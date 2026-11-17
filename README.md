@@ -182,11 +182,10 @@ flowchart TD
 
     C1 --> ENG
     GEO --> ENG
-    ENG --> DB_SQL
     ENG --> DB_MGO
 
-    API_LEADS <--> DB_SQL
-    API_CRAWL <--> DB_SQL
+    API_LEADS <--> DB_MGO
+    API_CRAWL <--> DB_MGO
     API_PIPE <--> DB_MGO
     API_CAMP <--> DB_MGO
     API_TPL <--> DB_MGO
