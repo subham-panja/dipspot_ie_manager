@@ -77,3 +77,4 @@ lerna-debug.log*
 
 # Docker local data
 mongo_data/
+

@@ -164,7 +164,7 @@ export default function GlobalImportersPage() {
       id: 'importers',
       label: 'Importers & Buyers',
       icon: <Globe className="w-4 h-4" />,
-      badge: total || 117,
+      badge: total,
       href: '/leads/importers',
       active: true,
       desc: 'Global wholesale buyers',

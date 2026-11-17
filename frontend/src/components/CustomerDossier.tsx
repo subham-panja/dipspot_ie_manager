@@ -50,6 +50,8 @@ interface CustomerLead {
   annual_volume_est?: string;
   risk_tier?: string;
   key_trade_lanes?: string[];
+  duplicate_probability?: number;
+  duplicate_status?: string;
 }
 
 interface CustomerDossierProps {
@@ -143,6 +145,17 @@ export default function CustomerDossier({
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${accentClasses.badgeBg}`}>
                   Score: {customer.priority_score}/100
                 </span>
+                {customer.duplicate_probability !== undefined && (
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                    customer.duplicate_probability >= 75
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                      : customer.duplicate_probability >= 30
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                  }`}>
+                    DB Match: {customer.duplicate_probability}% ({customer.duplicate_status || (customer.duplicate_probability >= 75 ? 'duplicate' : 'unique')})
+                  </span>
+                )}
               </div>
               <h2 className={`text-base font-bold mt-0.5 ${isLight ? 'text-slate-900' : 'text-white'}`}>
                 {customer.company_name}

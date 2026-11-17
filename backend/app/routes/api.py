@@ -159,6 +159,8 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "annual_volume_est": vol_est,
         "risk_tier": risk_tier,
         "key_trade_lanes": lanes,
+        "duplicate_probability": round(float(doc.get("duplicate_probability") if doc.get("duplicate_probability") is not None else 7.5), 1),
+        "duplicate_status": doc.get("duplicate_status") or ("duplicate" if float(doc.get("duplicate_probability") or 0) >= 75.0 else ("partial_match" if float(doc.get("duplicate_probability") or 0) >= 30.0 else "unique")),
         "created_at": str(doc.get("created_at") or ""),
         "updated_at": str(doc.get("updated_at") or ""),
     }
@@ -211,14 +213,14 @@ def get_leads():
         filter_q["priority_score"] = {"$gte": min_score}
 
     total = mongo_db.leads.count_documents(filter_q)
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 50, type=int)
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", 50, type=int), 1), 250)
     skip = (page - 1) * per_page
     pages = (total + per_page - 1) // per_page if total > 0 else 0
 
     cursor = (
         mongo_db.leads.find(filter_q)
-        .sort([("priority_score", -1), ("_id", -1)])
+        .sort([("_id", -1)])
         .skip(skip)
         .limit(per_page)
     )
@@ -268,14 +270,14 @@ def get_importers():
         filter_q["priority_score"] = {"$gte": min_score}
 
     total = mongo_db.leads.count_documents(filter_q)
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 25, type=int)
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", 25, type=int), 1), 250)
     skip = (page - 1) * per_page
     pages = (total + per_page - 1) // per_page if total > 0 else 0
 
     cursor = (
         mongo_db.leads.find(filter_q)
-        .sort([("priority_score", -1), ("_id", -1)])
+        .sort([("_id", -1)])
         .skip(skip)
         .limit(per_page)
     )
@@ -352,14 +354,14 @@ def get_suppliers():
         filter_q["priority_score"] = {"$gte": min_score}
 
     total = mongo_db.leads.count_documents(filter_q)
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 25, type=int)
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", 25, type=int), 1), 250)
     skip = (page - 1) * per_page
     pages = (total + per_page - 1) // per_page if total > 0 else 0
 
     cursor = (
         mongo_db.leads.find(filter_q)
-        .sort([("priority_score", -1), ("_id", -1)])
+        .sort([("_id", -1)])
         .skip(skip)
         .limit(per_page)
     )
@@ -660,58 +662,95 @@ def export_leads_csv():
 
 @api_bp.route("/scrape/importers", methods=["POST"])
 def trigger_importers_scrape():
-    job_id = start_importer_scrape(current_app._get_current_object())
+    data = request.get_json(silent=True) or {}
+    region = data.get("region")
+    commodity = data.get("commodity")
+    depth = int(data.get("depth", 30))
+    job_id = start_importer_scrape(
+        current_app._get_current_object(),
+        region=region,
+        commodity=commodity,
+        depth=depth,
+    )
     return jsonify({
         "job_id": job_id,
         "status": "pending",
-        "message": "Importer scraping job queued in background",
+        "message": f"Global importer crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
     }), 202
 
 
 @api_bp.route("/scrape/wb-mills", methods=["POST"])
 @api_bp.route("/scrape/suppliers", methods=["POST"])
 def trigger_wb_mills_scrape():
-    job_id = start_wb_mills_scrape(current_app._get_current_object())
+    data = request.get_json(silent=True) or {}
+    region = data.get("region")
+    commodity = data.get("commodity")
+    depth = int(data.get("depth", 30))
+    job_id = start_wb_mills_scrape(
+        current_app._get_current_object(),
+        region=region,
+        commodity=commodity,
+        depth=depth,
+    )
     return jsonify({
         "job_id": job_id,
         "status": "pending",
-        "message": "Commercial supplier scraping job queued in background",
+        "message": f"Commercial supplier crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
     }), 202
 
 
 @api_bp.route("/scrape/crawl-now", methods=["POST"])
 def trigger_crawl_now():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     lead_type = data.get("lead_type", "all")
+    region = data.get("region")
+    commodity = data.get("commodity")
+    depth = int(data.get("depth", 30))
     app_obj = current_app._get_current_object()
 
     if lead_type == "importer":
-        job_id = start_importer_scrape(app_obj)
-        return jsonify({"job_id": job_id, "status": "pending", "message": "Global importer crawler dispatched"}), 202
+        job_id = start_importer_scrape(app_obj, region=region, commodity=commodity, depth=depth)
+        return jsonify({
+            "job_id": job_id,
+            "status": "pending",
+            "message": f"Global importer crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
+        }), 202
     elif lead_type in ("supplier", "wb_mill"):
-        job_id = start_wb_mills_scrape(app_obj)
-        return jsonify({"job_id": job_id, "status": "pending", "message": "Commercial supplier crawler dispatched"}), 202
+        job_id = start_wb_mills_scrape(app_obj, region=region, commodity=commodity, depth=depth)
+        return jsonify({
+            "job_id": job_id,
+            "status": "pending",
+            "message": f"Commercial supplier crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
+        }), 202
     else:
-        imp_id = start_importer_scrape(app_obj)
-        sup_id = start_wb_mills_scrape(app_obj)
+        imp_depth = max(15, depth // 2)
+        sup_depth = max(15, depth // 2)
+        imp_id = start_importer_scrape(app_obj, region=region, commodity=commodity, depth=imp_depth)
+        sup_id = start_wb_mills_scrape(app_obj, region=region, commodity=commodity, depth=sup_depth)
         return jsonify({
             "importer_job_id": imp_id,
             "supplier_job_id": sup_id,
             "status": "pending",
-            "message": "Full-spectrum commercial crawler dispatched across global directories",
+            "message": f"Full-spectrum crawler dispatched for region '{region or 'Global'}' (Target Depth: {imp_depth + sup_depth} records)",
         }), 202
 
 
 @api_bp.route("/scrape/all", methods=["POST"])
 def trigger_all_scrape():
+    data = request.get_json(silent=True) or {}
+    region = data.get("region")
+    commodity = data.get("commodity")
+    depth = int(data.get("depth", 30))
     app_obj = current_app._get_current_object()
-    imp_id = start_importer_scrape(app_obj)
-    wb_id = start_wb_mills_scrape(app_obj)
+    imp_depth = max(15, depth // 2)
+    sup_depth = max(15, depth // 2)
+    imp_id = start_importer_scrape(app_obj, region=region, commodity=commodity, depth=imp_depth)
+    wb_id = start_wb_mills_scrape(app_obj, region=region, commodity=commodity, depth=sup_depth)
     return jsonify({
         "importer_job_id": imp_id,
         "wb_mills_job_id": wb_id,
         "status": "pending",
-        "message": "All scraper jobs (importers & WB mills) queued in background",
+        "message": f"All scraper jobs dispatched for region '{region or 'Global'}' (Total Depth: {imp_depth + sup_depth})",
     }), 202
 
 

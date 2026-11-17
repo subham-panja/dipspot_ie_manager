@@ -166,7 +166,7 @@ export default function VerifiedSuppliersPage() {
       id: 'suppliers',
       label: 'Verified Suppliers',
       icon: <Building2 className="w-4 h-4" />,
-      badge: total || 26,
+      badge: total,
       href: '/leads/suppliers',
       active: true,
       desc: 'Domestic processing facilities',
