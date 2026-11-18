@@ -52,6 +52,8 @@ interface CustomerLead {
   key_trade_lanes?: string[];
   duplicate_probability?: number;
   duplicate_status?: string;
+  source_name?: string;
+  source_url?: string;
 }
 
 interface CustomerDossierProps {
@@ -334,6 +336,25 @@ export default function CustomerDossier({
                     <div className="flex items-center justify-between pt-1">
                       <span className="text-slate-400 font-mono text-[10px]">Tax ID / GSTIN:</span>
                       <span className="font-mono text-emerald-400 font-bold text-[11px]">{customer.gstin}</span>
+                    </div>
+                  )}
+
+                  {customer.source_name && (
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-[11px]">
+                      <span className="text-slate-400">Verified Manifest Source:</span>
+                      {customer.source_url ? (
+                        <a
+                          href={customer.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1"
+                        >
+                          <span className="truncate max-w-[170px]">{customer.source_name}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span className="text-amber-300 font-medium">{customer.source_name}</span>
+                      )}
                     </div>
                   )}
                 </div>

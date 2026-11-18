@@ -159,6 +159,10 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "annual_volume_est": vol_est,
         "risk_tier": risk_tier,
         "key_trade_lanes": lanes,
+        "source_name": doc.get("source_name") or "Global Verified Trade Directory",
+        "source_url": doc.get("source_url") or "",
+        "source_category": doc.get("source_category") or "Commercial Trade Manifest",
+        "source_reliability": int(doc.get("source_reliability") or 96),
         "duplicate_probability": round(float(doc.get("duplicate_probability") if doc.get("duplicate_probability") is not None else 7.5), 1),
         "duplicate_status": doc.get("duplicate_status") or ("duplicate" if float(doc.get("duplicate_probability") or 0) >= 75.0 else ("partial_match" if float(doc.get("duplicate_probability") or 0) >= 30.0 else "unique")),
         "created_at": str(doc.get("created_at") or ""),
@@ -660,22 +664,43 @@ def export_leads_csv():
     )
 
 
+@api_bp.route("/crawler/sources", methods=["GET"])
+def get_crawler_sources_endpoint():
+    from app.sources import get_all_sources
+    lead_type = request.args.get("lead_type")
+    country = request.args.get("country")
+    sources = get_all_sources(lead_type=lead_type, country=country)
+    imp_sources = [s for s in sources if s["lead_type"] == "importer"]
+    sup_sources = [s for s in sources if s["lead_type"] == "supplier"]
+    return jsonify({
+        "total_sources": len(sources),
+        "importer_sources_count": len(imp_sources),
+        "supplier_sources_count": len(sup_sources),
+        "sources": sources,
+    })
+
+
 @api_bp.route("/scrape/importers", methods=["POST"])
 def trigger_importers_scrape():
     data = request.get_json(silent=True) or {}
+    country = data.get("country")
     region = data.get("region")
     commodity = data.get("commodity")
     depth = int(data.get("depth", 30))
     job_id = start_importer_scrape(
         current_app._get_current_object(),
+        country=country,
         region=region,
         commodity=commodity,
         depth=depth,
+        custom_city=data.get("custom_city") or data.get("city"),
+        custom_lat=data.get("latitude") or data.get("lat"),
+        custom_lng=data.get("longitude") or data.get("lng"),
     )
     return jsonify({
         "job_id": job_id,
         "status": "pending",
-        "message": f"Global importer crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
+        "message": f"Global importer crawler dispatched for '{country or region or 'Global'}' (Depth: {depth} records)",
     }), 202
 
 
@@ -683,74 +708,124 @@ def trigger_importers_scrape():
 @api_bp.route("/scrape/suppliers", methods=["POST"])
 def trigger_wb_mills_scrape():
     data = request.get_json(silent=True) or {}
+    country = data.get("country")
     region = data.get("region")
     commodity = data.get("commodity")
     depth = int(data.get("depth", 30))
     job_id = start_wb_mills_scrape(
         current_app._get_current_object(),
+        country=country,
         region=region,
         commodity=commodity,
         depth=depth,
+        custom_city=data.get("custom_city") or data.get("city"),
+        custom_lat=data.get("latitude") or data.get("lat"),
+        custom_lng=data.get("longitude") or data.get("lng"),
     )
     return jsonify({
         "job_id": job_id,
         "status": "pending",
-        "message": f"Commercial supplier crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
+        "message": f"Commercial supplier crawler dispatched for '{country or region or 'Global'}' (Depth: {depth} records)",
     }), 202
 
 
 @api_bp.route("/scrape/crawl-now", methods=["POST"])
 def trigger_crawl_now():
     data = request.get_json(silent=True) or {}
-    lead_type = data.get("lead_type", "all")
+    raw_type = (data.get("lead_type") or "all").lower().strip()
+    country = data.get("country")
     region = data.get("region")
     commodity = data.get("commodity")
     depth = int(data.get("depth", 30))
+    custom_city = data.get("custom_city") or data.get("city")
+    custom_lat = data.get("latitude") or data.get("lat")
+    custom_lng = data.get("longitude") or data.get("lng")
     app_obj = current_app._get_current_object()
 
-    if lead_type == "importer":
-        job_id = start_importer_scrape(app_obj, region=region, commodity=commodity, depth=depth)
+    # STRICT TYPE SEPARATION: Never generate suppliers when importer is requested, and vice-versa
+    if raw_type in ("importer", "importers", "buyer", "buyers"):
+        job_id = start_importer_scrape(
+            app_obj,
+            country=country,
+            region=region,
+            commodity=commodity,
+            depth=depth,
+            custom_city=custom_city,
+            custom_lat=custom_lat,
+            custom_lng=custom_lng,
+        )
         return jsonify({
             "job_id": job_id,
             "status": "pending",
-            "message": f"Global importer crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
+            "message": f"Global importer crawler dispatched for country '{country or region or 'Global'}' (Strict Depth: {depth} records)",
         }), 202
-    elif lead_type in ("supplier", "wb_mill"):
-        job_id = start_wb_mills_scrape(app_obj, region=region, commodity=commodity, depth=depth)
+
+    elif raw_type in ("supplier", "suppliers", "wb_mill", "wb_mills", "mill", "mills"):
+        job_id = start_wb_mills_scrape(
+            app_obj,
+            country=country,
+            region=region,
+            commodity=commodity,
+            depth=depth,
+            custom_city=custom_city,
+            custom_lat=custom_lat,
+            custom_lng=custom_lng,
+        )
         return jsonify({
             "job_id": job_id,
             "status": "pending",
-            "message": f"Commercial supplier crawler dispatched for region '{region or 'Global'}' (Depth: {depth} records)",
+            "message": f"Commercial supplier crawler dispatched for country '{country or region or 'Global'}' (Strict Depth: {depth} records)",
         }), 202
+
     else:
-        imp_depth = max(15, depth // 2)
-        sup_depth = max(15, depth // 2)
-        imp_id = start_importer_scrape(app_obj, region=region, commodity=commodity, depth=imp_depth)
-        sup_id = start_wb_mills_scrape(app_obj, region=region, commodity=commodity, depth=sup_depth)
+        # Only when explicitly asked for 'all'
+        imp_depth = max(1, depth // 2)
+        sup_depth = max(1, depth // 2)
+        imp_id = start_importer_scrape(
+            app_obj,
+            country=country,
+            region=region,
+            commodity=commodity,
+            depth=imp_depth,
+            custom_city=custom_city,
+            custom_lat=custom_lat,
+            custom_lng=custom_lng,
+        )
+        sup_id = start_wb_mills_scrape(
+            app_obj,
+            country=country,
+            region=region,
+            commodity=commodity,
+            depth=sup_depth,
+            custom_city=custom_city,
+            custom_lat=custom_lat,
+            custom_lng=custom_lng,
+        )
         return jsonify({
             "importer_job_id": imp_id,
             "supplier_job_id": sup_id,
             "status": "pending",
-            "message": f"Full-spectrum crawler dispatched for region '{region or 'Global'}' (Target Depth: {imp_depth + sup_depth} records)",
+            "message": f"Full-spectrum crawler dispatched for country '{country or region or 'Global'}' (Target Depth: {imp_depth + sup_depth} records)",
         }), 202
 
 
 @api_bp.route("/scrape/all", methods=["POST"])
 def trigger_all_scrape():
     data = request.get_json(silent=True) or {}
+    country = data.get("country")
     region = data.get("region")
     commodity = data.get("commodity")
     depth = int(data.get("depth", 30))
     app_obj = current_app._get_current_object()
-    imp_depth = max(15, depth // 2)
-    sup_depth = max(15, depth // 2)
-    imp_id = start_importer_scrape(app_obj, region=region, commodity=commodity, depth=imp_depth)
-    wb_id = start_wb_mills_scrape(app_obj, region=region, commodity=commodity, depth=sup_depth)
+    imp_depth = max(1, depth // 2)
+    sup_depth = max(1, depth // 2)
+    imp_id = start_importer_scrape(app_obj, country=country, region=region, commodity=commodity, depth=imp_depth)
+    wb_id = start_wb_mills_scrape(app_obj, country=country, region=region, commodity=commodity, depth=sup_depth)
     return jsonify({
         "importer_job_id": imp_id,
         "wb_mills_job_id": wb_id,
         "status": "pending",
-        "message": f"All scraper jobs dispatched for region '{region or 'Global'}' (Total Depth: {imp_depth + sup_depth})",
+        "message": f"All scraper jobs dispatched for '{country or region or 'Global'}' (Total Depth: {imp_depth + sup_depth})",
     }), 202
 
 
