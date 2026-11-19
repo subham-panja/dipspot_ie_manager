@@ -587,4 +587,50 @@ class TestCommodityAndTradeRelevanceGate:
         assert valid is False
         assert "no relevance to target commodity" in reason.lower()
 
+    def test_direct_b2b_directories_routing(self, app):
+        from app.real_scraper import RealisticWebScraper
+        scraper = RealisticWebScraper(enable_proxy_shield=False)
+
+        # 1. APEDA Exporter Registry
+        apeda_sup = {"id": "sup-src-01", "name": "APEDA Verified Indian Exporters", "url": "https://apeda.gov.in/apedawebsite/", "lead_type": "supplier"}
+        sup_leads = scraper.crawl_source_directly(apeda_sup, "India", "Basmati Rice", depth=3)
+        assert len(sup_leads) == 3
+        assert sup_leads[0]["country"] == "India"
+        assert sup_leads[0]["lead_type"] == "supplier"
+
+        # 2. Kompass International Directory
+        kompass_imp = {"id": "imp-src-06", "name": "Kompass International Buyer Directory", "url": "https://us.kompass.com/", "lead_type": "importer"}
+        k_leads = scraper.crawl_source_directly(kompass_imp, "United Arab Emirates", "Rice", depth=2)
+        assert len(k_leads) == 2
+        assert k_leads[0]["country"] == "United Arab Emirates"
+        assert k_leads[0]["lead_type"] == "importer"
+
+        # 3. Europages Directory
+        europages_imp = {"id": "imp-src-05", "name": "Europages European B2B Wholesale Buyers", "url": "https://www.europages.co.uk/", "lead_type": "importer"}
+        euro_leads = scraper.crawl_source_directly(europages_imp, "United Kingdom", "Rice", depth=2)
+        assert len(euro_leads) == 2
+        assert euro_leads[0]["lead_type"] == "importer"
+
+        # 4. TradeKey Directory
+        tradekey_sup = {"id": "sup-src-05", "name": "TradeKey Global Exporters", "url": "https://www.tradekey.com/", "lead_type": "supplier"}
+        tk_leads = scraper.crawl_source_directly(tradekey_sup, "India", "Rice", depth=2)
+        assert len(tk_leads) == 2
+        assert tk_leads[0]["lead_type"] == "supplier"
+
+    def test_verified_catalog_scale_and_quality(self):
+        from app.verified_catalog import VERIFIED_GLOBAL_ENTERPRISES
+        from app.real_scraper import is_blacklisted_domain
+
+        assert len(VERIFIED_GLOBAL_ENTERPRISES) >= 120
+        for ent in VERIFIED_GLOBAL_ENTERPRISES:
+            assert ent.get("company_name") and len(ent["company_name"]) > 3
+            assert ent.get("country")
+            assert ent.get("lead_type") in ("importer", "wb_mill")
+            assert ent.get("phones") and len(ent["phones"]) > 5
+            assert ent.get("domain")
+            assert not is_blacklisted_domain(ent["domain"])
+            assert "gaming" not in ent["company_name"].lower()
+            assert "solitaire" not in ent["company_name"].lower()
+
+
 

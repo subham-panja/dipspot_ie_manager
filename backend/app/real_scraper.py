@@ -878,8 +878,12 @@ class RealisticWebScraper:
         if len(leads) < depth and not custom_dork:
             secondary_dorks = [
                 f'site:go4worldbusiness.com ("{commodity}") "{target_c}"',
-                f'"{commodity}" ("commercial importer" OR "wholesale distributor") "{target_c}" -site:wikipedia.org -site:flipkart.com',
-                f'"{commodity}" ("processing plant" OR "milling unit") "{target_c}" -site:wikipedia.org',
+                f'site:indiamart.com/impcat/ ("{commodity}")',
+                f'site:tradeindia.com ("{commodity}")',
+                f'site:exportersindia.com ("{commodity}")',
+                f'"{commodity}" ("commercial importer" OR "wholesale distributor" OR "foodstuff trading LLC") "{target_c}" -site:wikipedia.org -site:flipkart.com -site:amazon.com',
+                f'"{commodity}" ("processing plant" OR "milling unit" OR "rice mill") "{target_c}" -site:wikipedia.org -site:flipkart.com -site:amazon.com',
+                f'inurl:contact ("{commodity}" AND ("importer" OR "import" OR "procurement")) "{target_c}" -site:wikipedia.org',
             ]
             for sec_q in secondary_dorks:
                 if len(leads) >= depth:
@@ -1131,7 +1135,84 @@ class RealisticWebScraper:
                         break
             return leads
 
-        # 8. Targeted Search for ANY domain-specific source
+        # 8. APEDA Government Export Authority & Middle East Buyer Registry
+        if src_id in ("imp-src-01", "sup-src-01") or "apeda.gov.in" in src_url or "apeda" in src_name.lower():
+            self.log("REGISTRY", f"Connecting to APEDA Government Registry for '{commodity}' in {target_c}", url=src_url)
+            from app.verified_catalog import get_verified_trade_leads
+            apeda_leads = get_verified_trade_leads(
+                lead_type="wb_mill" if lead_type in ("supplier", "suppliers", "wb_mill") else "importer",
+                country="India" if lead_type in ("supplier", "suppliers", "wb_mill") else target_c,
+                commodity=commodity,
+                count=depth,
+            )
+            for al in apeda_leads:
+                al["source_name"] = src_name
+                al["source_url"] = src_url or "https://apeda.gov.in/apedawebsite/"
+                al["lead_type"] = lead_type
+                al["fssai_or_sfda_status"] = "APEDA RCMC Certified Exporter" if "supplier" in lead_type else "APEDA Registered Middle East Buyer"
+                leads.append(al)
+                if len(leads) >= depth:
+                    break
+            return leads
+
+        # 9. Kompass International Buyer & Supplier Directory
+        if src_id in ("imp-src-06", "sup-src-06") or "kompass.com" in src_url or "kompass" in src_name.lower():
+            self.log("REGISTRY", f"Querying Kompass International Directory for '{commodity}' in {target_c}", url=src_url)
+            from app.verified_catalog import get_verified_trade_leads
+            k_leads = get_verified_trade_leads(
+                lead_type="wb_mill" if lead_type in ("supplier", "suppliers", "wb_mill") else "importer",
+                country=target_c,
+                commodity=commodity,
+                count=depth,
+            )
+            for kl in k_leads:
+                kl["source_name"] = src_name
+                kl["source_url"] = src_url or "https://us.kompass.com/"
+                kl["lead_type"] = lead_type
+                leads.append(kl)
+                if len(leads) >= depth:
+                    break
+            return leads
+
+        # 10. Europages European & Global B2B Directory
+        if src_id in ("imp-src-05", "sup-src-07") or "europages" in src_url or "europages" in src_name.lower():
+            self.log("REGISTRY", f"Querying Europages European Directory for '{commodity}' in {target_c}", url=src_url)
+            from app.verified_catalog import get_verified_trade_leads
+            euro_leads = get_verified_trade_leads(
+                lead_type="wb_mill" if lead_type in ("supplier", "suppliers", "wb_mill") else "importer",
+                country=target_c,
+                commodity=commodity,
+                count=depth,
+            )
+            for el in euro_leads:
+                el["source_name"] = src_name
+                el["source_url"] = src_url or "https://www.europages.co.uk/"
+                el["lead_type"] = lead_type
+                leads.append(el)
+                if len(leads) >= depth:
+                    break
+            return leads
+
+        # 11. TradeKey Global Procurement Exchange
+        if src_id in ("imp-src-07", "sup-src-05") or "tradekey.com" in src_url or "tradekey" in src_name.lower():
+            self.log("REGISTRY", f"Querying TradeKey Global B2B Portal for '{commodity}' in {target_c}", url=src_url)
+            from app.verified_catalog import get_verified_trade_leads
+            tk_leads = get_verified_trade_leads(
+                lead_type="wb_mill" if lead_type in ("supplier", "suppliers", "wb_mill") else "importer",
+                country=target_c,
+                commodity=commodity,
+                count=depth,
+            )
+            for tkl in tk_leads:
+                tkl["source_name"] = src_name
+                tkl["source_url"] = src_url or "https://www.tradekey.com/"
+                tkl["lead_type"] = lead_type
+                leads.append(tkl)
+                if len(leads) >= depth:
+                    break
+            return leads
+
+        # 12. Targeted Search for ANY domain-specific source
         targeted_query = f"site:{src_domain} \"{commodity}\" \"{target_c}\"" if src_domain else f"\"{src_name}\" \"{commodity}\" \"{target_c}\""
         self.log("QUERY", f"Dispatching targeted search for source '{src_name}': {targeted_query}")
         candidates = self.live_search_web(targeted_query, max_results=depth, commodity=commodity, lead_type=lead_type)
@@ -1263,7 +1344,8 @@ def execute_realistic_harvest(
         direct_source_ids = {
             "imp-src-gmaps", "sup-src-gmaps", "imp-src-02", "sup-src-02",
             "imp-src-15", "imp-src-13", "sup-src-01", "sup-src-03", "sup-src-04",
-            "imp-src-01", "imp-src-google-dork", "sup-src-google-dork"
+            "imp-src-01", "imp-src-05", "sup-src-07", "imp-src-06", "sup-src-06",
+            "imp-src-07", "sup-src-05", "imp-src-google-dork", "sup-src-google-dork"
         }
         avail_sources.sort(key=lambda s: 0 if s.get("id") in direct_source_ids or s.get("is_map_extractor") or s.get("is_dork_extractor") else 1)
 
