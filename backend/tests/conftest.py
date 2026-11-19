@@ -35,12 +35,22 @@ def app():
 
     yield app
 
-    # Cleanup
+        # Cleanup
     with app.app_context():
         from app.models import db
         db.drop_all()
     os.close(db_fd)
     os.unlink(db_path)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Drop the test MongoDB database once all test sessions complete."""
+    try:
+        from pymongo import MongoClient
+        c = MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=2000)
+        c.drop_database("trade_suite_test")
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
