@@ -202,6 +202,10 @@ def get_leads():
     if country:
         filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
 
+    country = request.args.get("country")
+    if country:
+        filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
+
     district = request.args.get("district")
     if district:
         filter_q["district"] = {"$regex": re.escape(district), "$options": "i"}
@@ -222,6 +226,14 @@ def get_leads():
     min_score = request.args.get("min_score", type=int)
     if min_score is not None:
         filter_q["priority_score"] = {"$gte": min_score}
+
+    custom_label = request.args.get("custom_label")
+    if custom_label:
+        filter_q["custom_label"] = {"$regex": re.escape(custom_label), "$options": "i"}
+
+    job_id = request.args.get("job_id", type=int)
+    if job_id is not None:
+        filter_q["job_id"] = job_id
 
     total = mongo_db.leads.count_documents(filter_q)
     page = max(request.args.get("page", 1, type=int), 1)
@@ -281,6 +293,14 @@ def get_importers():
     if min_score is not None:
         filter_q["priority_score"] = {"$gte": min_score}
 
+    custom_label = request.args.get("custom_label")
+    if custom_label:
+        filter_q["custom_label"] = {"$regex": re.escape(custom_label), "$options": "i"}
+
+    job_id = request.args.get("job_id", type=int)
+    if job_id is not None:
+        filter_q["job_id"] = job_id
+
     total = mongo_db.leads.count_documents(filter_q)
     page = max(request.args.get("page", 1, type=int), 1)
     per_page = min(max(request.args.get("per_page", 25, type=int), 1), 250)
@@ -338,6 +358,10 @@ def get_suppliers():
     include_deleted = request.args.get("include_deleted", "").lower() == "true"
     filter_q = {"lead_type": {"$ne": "importer"}} if include_deleted else {"lead_type": {"$ne": "importer"}, "is_deleted": {"$ne": True}}
 
+    country = request.args.get("country")
+    if country:
+        filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
+
     district = request.args.get("district")
     if district:
         filter_q["district"] = {"$regex": re.escape(district), "$options": "i"}
@@ -365,6 +389,14 @@ def get_suppliers():
     min_score = request.args.get("min_score", type=int)
     if min_score is not None:
         filter_q["priority_score"] = {"$gte": min_score}
+
+    custom_label = request.args.get("custom_label")
+    if custom_label:
+        filter_q["custom_label"] = {"$regex": re.escape(custom_label), "$options": "i"}
+
+    job_id = request.args.get("job_id", type=int)
+    if job_id is not None:
+        filter_q["job_id"] = job_id
 
     total = mongo_db.leads.count_documents(filter_q)
     page = max(request.args.get("page", 1, type=int), 1)
@@ -760,14 +792,24 @@ def export_leads_csv():
 
 @api_bp.route("/crawler/history", methods=["GET"])
 def get_crawler_history():
-    """Returns extraction history records with custom audit labels."""
+    """Returns extraction history records with custom audit labels and crawl job summaries."""
     mongo_db = get_db()
-    cursor = mongo_db.extraction_history.find({}).sort("created_at", -1).limit(50)
     history = []
-    for h in cursor:
+    seen_ids = set()
+
+    for doc in mongo_db.crawler_jobs.find({}).sort("job_id", -1).limit(50):
+        d = dict(doc)
+        d["_id"] = str(d["_id"])
+        d.pop("logs", None)
+        seen_ids.add(d.get("job_id"))
+        history.append(d)
+
+    for h in mongo_db.extraction_history.find({}).sort("created_at", -1).limit(50):
         d = dict(h)
         d["_id"] = str(d["_id"])
-        history.append(d)
+        if d.get("job_id") not in seen_ids:
+            history.append(d)
+
     return jsonify({
         "total": len(history),
         "history": history,
@@ -946,6 +988,8 @@ def trigger_crawl_now():
     custom_label = (data.get("custom_label") or "").strip() or "Standard Harvest"
     extraction_notes = (data.get("extraction_notes") or "").strip()
     selected_sources = data.get("selected_sources")
+    custom_dork = (data.get("custom_dork") or "").strip() or None
+    enable_proxy_shield = bool(data.get("enable_proxy_shield", True))
     app_obj = current_app._get_current_object()
 
     # STRICT TYPE SEPARATION: Never generate suppliers when importer is requested, and vice-versa
@@ -962,6 +1006,8 @@ def trigger_crawl_now():
             custom_label=custom_label,
             extraction_notes=extraction_notes,
             selected_sources=selected_sources,
+            custom_dork=custom_dork,
+            enable_proxy_shield=enable_proxy_shield,
         )
         return jsonify({
             "job_id": job_id,
@@ -983,6 +1029,8 @@ def trigger_crawl_now():
             custom_label=custom_label,
             extraction_notes=extraction_notes,
             selected_sources=selected_sources,
+            custom_dork=custom_dork,
+            enable_proxy_shield=enable_proxy_shield,
         )
         return jsonify({
             "job_id": job_id,
@@ -1006,6 +1054,8 @@ def trigger_crawl_now():
             custom_label=custom_label,
             extraction_notes=extraction_notes,
             selected_sources=selected_sources,
+            custom_dork=custom_dork,
+            enable_proxy_shield=enable_proxy_shield,
         )
         sup_id = start_wb_mills_scrape(
             app_obj,
@@ -1019,6 +1069,8 @@ def trigger_crawl_now():
             custom_label=custom_label,
             extraction_notes=extraction_notes,
             selected_sources=selected_sources,
+            custom_dork=custom_dork,
+            enable_proxy_shield=enable_proxy_shield,
         )
         return jsonify({
             "importer_job_id": imp_id,

@@ -1011,6 +1011,7 @@ def _save_leads_with_dedup(
                     "match_reason": best_reason,
                     "candidate_company": item.get("company_name", ""),
                     "custom_label": custom_label or item.get("custom_label", ""),
+                    "job_id": job_id or item.get("job_id"),
                 }
 
                 mongo_db.leads.update_one(
@@ -1031,6 +1032,7 @@ def _save_leads_with_dedup(
                 doc["duplicate_probability"] = round(best_score, 1)
                 doc["duplicate_status"] = "unique"
                 doc["merge_count"] = 1
+                doc["job_id"] = job_id or item.get("job_id")
                 doc["custom_label"] = custom_label or item.get("custom_label", "")
                 doc["extraction_notes"] = extraction_notes or item.get("extraction_notes", "")
                 doc["is_deleted"] = False
@@ -1120,6 +1122,8 @@ def run_importer_scrape_thread(
     custom_label: Optional[str] = None,
     extraction_notes: Optional[str] = None,
     selected_sources: Optional[List[str]] = None,
+    custom_dork: Optional[str] = None,
+    enable_proxy_shield: bool = True,
 ):
     """Executes realistic importer web harvesting and contact parsing strictly for the specified country."""
     from app.real_scraper import execute_realistic_harvest
@@ -1137,6 +1141,8 @@ def run_importer_scrape_thread(
             custom_label=custom_label,
             extraction_notes=extraction_notes,
             selected_sources=selected_sources,
+            custom_dork=custom_dork,
+            enable_proxy_shield=enable_proxy_shield,
             job_id=job_id,
         )
     except Exception as e:
@@ -1156,6 +1162,8 @@ def run_wb_mills_scrape_thread(
     custom_label: Optional[str] = None,
     extraction_notes: Optional[str] = None,
     selected_sources: Optional[List[str]] = None,
+    custom_dork: Optional[str] = None,
+    enable_proxy_shield: bool = True,
 ):
     """Executes realistic supplier web harvesting and contact parsing strictly for the specified country."""
     from app.real_scraper import execute_realistic_harvest
@@ -1173,6 +1181,8 @@ def run_wb_mills_scrape_thread(
             custom_label=custom_label,
             extraction_notes=extraction_notes,
             selected_sources=selected_sources,
+            custom_dork=custom_dork,
+            enable_proxy_shield=enable_proxy_shield,
             job_id=job_id,
         )
     except Exception as e:
@@ -1195,6 +1205,8 @@ def start_importer_scrape(
     custom_label: Optional[str] = None,
     extraction_notes: Optional[str] = None,
     selected_sources: Optional[List[str]] = None,
+    custom_dork: Optional[str] = None,
+    enable_proxy_shield: bool = True,
 ) -> int:
     with app.app_context():
         job = ScrapeJob(job_type="importer", status="pending")
@@ -1202,9 +1214,41 @@ def start_importer_scrape(
         db.session.commit()
         job_id = job.id
 
+    try:
+        from app.db import get_db, now_iso
+        mongo_db = get_db()
+        mongo_db.crawler_jobs.update_one(
+            {"job_id": job_id},
+            {
+                "$set": {
+                    "job_id": job_id,
+                    "lead_type": "importer",
+                    "country": country or region or "Global",
+                    "commodity": commodity or "Rice",
+                    "depth": depth,
+                    "custom_label": custom_label or "Standard Harvest",
+                    "status": "running",
+                    "progress_pct": 5,
+                    "current_step": "Initializing crawler thread...",
+                    "current_url": "",
+                    "leads_found": 0,
+                    "inserted_count": 0,
+                    "merged_count": 0,
+                    "elapsed_seconds": 0,
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                    "logs": [],
+                }
+            },
+            upsert=True,
+        )
+    except Exception:
+        pass
+
     t = threading.Thread(
         target=run_importer_scrape_thread,
         args=(app, job_id, country, region, commodity, depth, custom_city, custom_lat, custom_lng, custom_label, extraction_notes, selected_sources),
+        kwargs={"custom_dork": custom_dork, "enable_proxy_shield": enable_proxy_shield},
         daemon=True,
     )
     t.start()
@@ -1223,6 +1267,8 @@ def start_wb_mills_scrape(
     custom_label: Optional[str] = None,
     extraction_notes: Optional[str] = None,
     selected_sources: Optional[List[str]] = None,
+    custom_dork: Optional[str] = None,
+    enable_proxy_shield: bool = True,
 ) -> int:
     with app.app_context():
         job = ScrapeJob(job_type="wb_mill", status="pending")
@@ -1230,9 +1276,41 @@ def start_wb_mills_scrape(
         db.session.commit()
         job_id = job.id
 
+    try:
+        from app.db import get_db, now_iso
+        mongo_db = get_db()
+        mongo_db.crawler_jobs.update_one(
+            {"job_id": job_id},
+            {
+                "$set": {
+                    "job_id": job_id,
+                    "lead_type": "supplier",
+                    "country": country or region or "India",
+                    "commodity": commodity or "Rice",
+                    "depth": depth,
+                    "custom_label": custom_label or "Standard Harvest",
+                    "status": "running",
+                    "progress_pct": 5,
+                    "current_step": "Initializing supplier crawler thread...",
+                    "current_url": "",
+                    "leads_found": 0,
+                    "inserted_count": 0,
+                    "merged_count": 0,
+                    "elapsed_seconds": 0,
+                    "created_at": now_iso(),
+                    "updated_at": now_iso(),
+                    "logs": [],
+                }
+            },
+            upsert=True,
+        )
+    except Exception:
+        pass
+
     t = threading.Thread(
         target=run_wb_mills_scrape_thread,
         args=(app, job_id, country, region, commodity, depth, custom_city, custom_lat, custom_lng, custom_label, extraction_notes, selected_sources),
+        kwargs={"custom_dork": custom_dork, "enable_proxy_shield": enable_proxy_shield},
         daemon=True,
     )
     t.start()

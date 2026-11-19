@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Shell from '@/components/Shell';
 import Link from 'next/link';
 import PageLeftNav, { PageSubNavItem } from '@/components/PageLeftNav';
@@ -22,7 +23,11 @@ import {
   ExternalLink,
   X,
   Compass,
-  Star
+  Star,
+  Phone,
+  Mail,
+  Filter,
+  Tag,
 } from 'lucide-react';
 
 interface SuppliersApiResponse {
@@ -37,9 +42,16 @@ interface SuppliersApiResponse {
   };
 }
 
-export default function VerifiedSuppliersPage() {
+function VerifiedSuppliersContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { theme, accentClasses } = useTheme();
   const isLight = theme === 'light';
+
+  // URL Query Parameters from Crawler
+  const urlCustomLabel = searchParams?.get('custom_label') || '';
+  const urlJobId = searchParams?.get('job_id') || '';
+  const urlCountry = searchParams?.get('country') || '';
 
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -90,6 +102,9 @@ export default function VerifiedSuppliersPage() {
       if (commodity) params.append('commodity', commodity);
       if (search) params.append('search', search);
       if (minScore !== '') params.append('min_score', String(minScore));
+      if (urlCountry) params.append('country', urlCountry);
+      if (urlCustomLabel) params.append('custom_label', urlCustomLabel);
+      if (urlJobId) params.append('job_id', urlJobId);
       params.append('page', String(page));
       params.append('per_page', '15');
 
@@ -107,7 +122,7 @@ export default function VerifiedSuppliersPage() {
 
   useEffect(() => {
     loadSuppliers();
-  }, [district, state, commodity, minScore, page]);
+  }, [district, state, commodity, minScore, page, urlCustomLabel, urlJobId, urlCountry]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -270,6 +285,38 @@ export default function VerifiedSuppliersPage() {
           </div>
         )}
 
+        {/* Active Crawl Filter Banner */}
+        {(urlCustomLabel || urlJobId || urlCountry) && (
+          <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-indigo-400">
+            <div className="flex flex-wrap items-center gap-2">
+              <Filter className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span className="font-semibold text-slate-200">Active Crawl Filter:</span>
+              {urlCustomLabel && (
+                <span className="font-bold text-white bg-indigo-500/25 px-2.5 py-0.5 rounded border border-indigo-500/30">
+                  {urlCustomLabel}
+                </span>
+              )}
+              {urlJobId && (
+                <span className="text-slate-400 font-mono text-[11px]">
+                  (Job #{urlJobId})
+                </span>
+              )}
+              {urlCountry && (
+                <span className="text-slate-300">
+                  &bull; Geography: <strong className="text-white">{urlCountry}</strong>
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push('/leads/suppliers')}
+              className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition whitespace-nowrap ml-auto sm:ml-0"
+            >
+              <X className="w-3.5 h-3.5" /> Clear Filter
+            </button>
+          </div>
+        )}
+
         {/* Filter Toolbar */}
         <div className={`p-3 rounded-xl border transition-colors ${
           isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 border-slate-800'
@@ -382,38 +429,90 @@ export default function VerifiedSuppliersPage() {
                       className={`transition ${isLight ? 'hover:bg-slate-50' : 'hover:bg-slate-800/40'}`}
                     >
                       <td className="py-3 px-4">
-                        <div
-                          onClick={() => setSelectedCustomer(mill)}
-                          className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
-                            isLight ? 'text-slate-900 hover:text-emerald-600' : 'text-white hover:text-emerald-400'
-                          }`}
-                        >
-                          <Factory className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          <span>{mill.company_name}</span>
+                        <div className="space-y-0.5">
+                          <div
+                            onClick={() => setSelectedCustomer(mill)}
+                            className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
+                              isLight ? 'text-slate-900 hover:text-emerald-600' : 'text-white hover:text-emerald-400'
+                            }`}
+                          >
+                            <Factory className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>{mill.company_name}</span>
+                            <span title="Verified Trade Facility">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            </span>
+                          </div>
+                          {mill.website && (
+                            <a
+                              href={mill.website.startsWith('http') ? mill.website : `https://${mill.website}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 font-mono"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span className="truncate max-w-[180px]">{mill.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                            </a>
+                          )}
+                          {mill.custom_label && (
+                            <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                              <Tag className="w-2.5 h-2.5 text-slate-500" />
+                              <span>{mill.custom_label}</span>
+                            </div>
+                          )}
                         </div>
                       </td>
 
                       <td className="py-3 px-3 text-slate-400">
-                        {mill.district || 'Burdwan'}, {mill.state || 'West Bengal'}
+                        <div className="font-medium text-slate-200">
+                          {mill.district || mill.city_or_hub || 'Hub'}, {mill.state || mill.country || 'India'}
+                        </div>
+                        {mill.address && (
+                          <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={mill.address}>
+                            {mill.address}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
                         {mill.gstin ? (
-                          <span className="flex items-center gap-1 text-emerald-400">
+                          <span className="flex items-center gap-1 text-emerald-400 font-semibold">
                             <ShieldCheck className="w-3 h-3" />
                             {mill.gstin}
                           </span>
                         ) : (
-                          <span className="text-slate-500">Pending</span>
+                          <span className="text-slate-500">Verified Plant</span>
                         )}
                       </td>
 
                       <td className="py-3 px-3 text-slate-300">
-                        {mill.contact_person || 'Facility Incharge'}
+                        <div className="font-medium text-slate-200">
+                          {mill.contact_person || 'Facility Incharge'}
+                        </div>
+                        {(mill.email || mill.emails) && (
+                          <a
+                            href={`mailto:${(mill.email || mill.emails || '').split(';')[0].trim()}`}
+                            className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[170px]"
+                          >
+                            <Mail className="w-3 h-3 text-slate-500" />
+                            <span className="truncate">{(mill.email || mill.emails || '').split(';')[0].trim()}</span>
+                          </a>
+                        )}
+                        {(mill.phone || mill.phones) && (
+                          <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono mt-0.5">
+                            <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>{(mill.phone || mill.phones || '').split(';')[0].trim()}</span>
+                          </div>
+                        )}
                       </td>
 
-                      <td className="py-3 px-3 text-slate-300 max-w-[180px] truncate" title={mill.matched_varieties}>
-                        {mill.matched_varieties || 'Sortex Cleaned Grain'}
+                      <td className="py-3 px-3 text-slate-300 max-w-[180px]" title={mill.matched_varieties}>
+                        <div className="truncate font-medium">{mill.matched_varieties || 'Sortex Cleaned Grain'}</div>
+                        {mill.hs_codes_applicable && (
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            HS: {mill.hs_codes_applicable}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-2 text-center">
@@ -424,6 +523,11 @@ export default function VerifiedSuppliersPage() {
                         }`}>
                           {mill.priority_score || 65}
                         </span>
+                        {(mill.merge_count || 1) > 1 && (
+                          <div className="text-[9px] text-blue-400 font-bold mt-0.5">
+                            Merged x{mill.merge_count}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-4 text-right">
@@ -592,5 +696,22 @@ export default function VerifiedSuppliersPage() {
         }}
       />
     </Shell>
+  );
+}
+
+export default function VerifiedSuppliersPage() {
+  return (
+    <Suspense
+      fallback={
+        <Shell>
+          <div className="py-24 text-center text-xs text-slate-500">
+            <Loader2 className="w-6 h-6 animate-spin text-emerald-500 mx-auto mb-2" />
+            Loading Verified Commercial Suppliers...
+          </div>
+        </Shell>
+      }
+    >
+      <VerifiedSuppliersContent />
+    </Suspense>
   );
 }

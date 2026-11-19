@@ -179,44 +179,93 @@ def parse_go4wb_html(
 def parse_atninfo_html(html: str, source_url: str = "") -> List[Dict[str, any]]:
     leads = []
     soup = BeautifulSoup(html, "lxml")
-    cards = soup.find_all(class_=re.compile(r"(company|listing|business)", re.I))
+    cards = soup.select(".col-sm-12.col-lg-6, [data-comp-id], .comp-box")
     if not cards:
-        cards = soup.find_all("div")
+        cards = soup.find_all(class_=re.compile(r"(company|listing|business)", re.I))
 
+    seen_names = set()
     for card in cards:
-        txt = card.get_text(" ", strip=True)
-        if len(txt) > 2000:
-            continue
-        title_tag = card.find(["h1", "h2", "h3", "h4", "a", "b"], class_=re.compile(r"(title|name|header)", re.I))
-        if not title_tag:
-            title_tag = card.find(["h2", "h3", "a", "b"])
-        name = title_tag.get_text(strip=True) if title_tag else ""
-        if not name or len(name) < 4:
+        name_el = card.select_one("h2[itemprop='name'] a, h2 a, a.compClick, h2, h3")
+        if not name_el:
+            title_tag = card.find(["h2", "h3", "h4", "a", "b"], class_=re.compile(r"(title|name)", re.I))
+            if title_tag:
+                name_el = title_tag
+        if not name_el:
             continue
 
-        accepted, tags, score = classify_non_basmati_relevance(txt)
-        if not accepted and "rice" not in txt.lower() and "food" not in txt.lower():
+        name = name_el.get_text(strip=True)
+        if (
+            not name
+            or len(name) < 4
+            or name.lower() in ("rice", "suppliers", "importers", "home")
+            or "rice importers & suppliers in uae" in name.lower()
+        ):
             continue
 
-        emails = normalize_deobfuscated_emails(txt)
-        phones = normalize_phones(txt, "AE")
-        web_link = card.find("a", href=re.compile(r"^https?://(?!.*(facebook|twitter|instagram|linkedin|atninfo))"))
-        website = web_link["href"] if web_link else ""
+        if name.lower() in seen_names:
+            continue
+        seen_names.add(name.lower())
+
+        # Telephone: extract from tel: anchor or card text
+        phones = []
+        tel_a = card.select_one("a[href^='tel:']")
+        if tel_a and tel_a.get("href"):
+            p_val = tel_a["href"].replace("tel:", "").strip()
+            if len(p_val) >= 7:
+                phones.append(p_val)
+        if not phones:
+            p_match = re.search(r"(?:\+?971|00971)[\d\s\-]{7,15}", card.get_text())
+            if p_match:
+                phones.append(p_match.group(0).strip())
+        norm_phones = normalize_phones(" ".join(phones), "AE")
+
+        # Website: extract genuine corporate website from websiteClick or itemprop=url
+        website = ""
+        web_a = card.select_one("a.web.websiteClick, a.websiteClick, a[itemprop='url']")
+        if web_a and web_a.get("href"):
+            raw_web = web_a["href"]
+            if not any(junk in raw_web for junk in ("atninfo.com", "facebook.com", "instagram.com", "twitter.com", "google.com/maps", "youtube.com")):
+                from urllib.parse import urlparse
+                parsed = urlparse(raw_web)
+                website = f"{parsed.scheme or 'http'}://{parsed.netloc}" if parsed.netloc else raw_web
+
+        # Address & Emirate from microdata
+        locality = card.select_one("[itemprop='addressLocality']")
+        street = card.select_one("[itemprop='streetAddress']")
+        region = card.select_one("[itemprop='addressRegion']")
+
+        loc_txt = locality.get_text(strip=True) if locality else ""
+        str_txt = street.get_text(strip=True) if street else ""
+        reg_txt = region.get_text(strip=True) if region else "Dubai"
+
+        addr_parts = [p for p in [str_txt, loc_txt, reg_txt, "United Arab Emirates"] if p]
+        address = ", ".join(addr_parts) if addr_parts else "United Arab Emirates"
+
+        # Emails: ONLY real emails from DOM
+        emails = normalize_deobfuscated_emails(card.get_text(" ", strip=True))
+
+        profile_link = name_el.get("href", "")
+        item_source_url = (
+            profile_link
+            if (profile_link and profile_link.startswith("http"))
+            else (source_url or "https://www.atninfo.com/uae/all/rice-1263")
+        )
 
         leads.append({
             "company_name": name,
             "country": "United Arab Emirates",
-            "city_or_hub": "Dubai / Sharjah / UAE",
-            "contact_person": "Import / Trade Desk",
-            "phones": "; ".join(phones),
+            "city_or_hub": reg_txt or "Dubai",
+            "contact_person": "Import & Procurement Desk",
+            "phones": "; ".join(norm_phones),
             "emails": "; ".join(emails),
             "website": website,
-            "address": txt[:160],
-            "matched_varieties": tags or "rice; parboiled; non-basmati",
+            "address": address,
+            "matched_varieties": "Rice; Parboiled Rice; Non-Basmati & Basmati",
             "hs_codes_applicable": "10063019; 10063099",
-            "inquiry_or_profile": txt[:200],
-            "priority_score": max(score, 80),
-            "source_url": source_url or "https://atninfo.com/uae/all/rice-1263",
+            "inquiry_or_profile": f"Active UAE Grain & Rice Importer. Registered under {reg_txt} Commercial Desk.",
+            "priority_score": 92 if website else 85,
+            "source_name": "ATN Info GCC Commercial Sourcing Desk",
+            "source_url": item_source_url,
             "lead_type": "importer",
         })
     return leads

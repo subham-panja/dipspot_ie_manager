@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Shell from '@/components/Shell';
 import PageLeftNav, { PageSubNavItem } from '@/components/PageLeftNav';
@@ -17,13 +18,17 @@ import {
   ChevronRight,
   ExternalLink,
   Phone,
+  Mail,
   Sparkles,
   Download,
   Filter,
   CheckCircle,
   X,
   Compass,
-  Star
+  Star,
+  MapPin,
+  ShieldCheck,
+  Tag,
 } from 'lucide-react';
 
 interface Importer {
@@ -31,16 +36,26 @@ interface Importer {
   company_name: string;
   country: string;
   city?: string;
+  city_or_hub?: string;
   contact_person?: string;
   phone?: string;
+  phones?: string;
   email?: string;
+  emails?: string;
   website?: string;
+  address?: string;
   matched_varieties?: string;
+  hs_codes_applicable?: string;
   priority_score: number;
   import_capacity_mt?: number;
   annual_turnover_usd?: string;
   lead_type: string;
   verified_status: string;
+  source_name?: string;
+  source_url?: string;
+  merge_count?: number;
+  custom_label?: string;
+  job_id?: number;
   created_at: string;
 }
 
@@ -59,9 +74,16 @@ interface ImportersResponse {
   };
 }
 
-export default function GlobalImportersPage() {
+function GlobalImportersContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { theme, accentClasses } = useTheme();
   const isLight = theme === 'light';
+
+  // URL Query Parameters
+  const urlCustomLabel = searchParams?.get('custom_label') || '';
+  const urlJobId = searchParams?.get('job_id') || '';
+  const urlCountry = searchParams?.get('country') || '';
 
   const [importers, setImporters] = useState<Importer[]>([]);
   const [aggregations, setAggregations] = useState<ImportersResponse['aggregations'] | null>(null);
@@ -71,7 +93,7 @@ export default function GlobalImportersPage() {
   const [loading, setLoading] = useState(true);
 
   // Filters
-  const [country, setCountry] = useState('');
+  const [country, setCountry] = useState(urlCountry || '');
   const [minScore, setMinScore] = useState<number | ''>('');
   const [search, setSearch] = useState('');
 
@@ -104,9 +126,12 @@ export default function GlobalImportersPage() {
       const params = new URLSearchParams();
       params.append('page', String(pageNum));
       params.append('per_page', '15');
-      if (country) params.append('country', country);
+      const effectiveCountry = country || urlCountry;
+      if (effectiveCountry) params.append('country', effectiveCountry);
       if (minScore) params.append('min_score', String(minScore));
       if (search.trim()) params.append('search', search.trim());
+      if (urlCustomLabel) params.append('custom_label', urlCustomLabel);
+      if (urlJobId) params.append('job_id', urlJobId);
 
       const res = await fetchJson<ImportersResponse>(`/leads/importers?${params.toString()}`);
       setImporters(res.importers || res.leads || []);
@@ -125,7 +150,7 @@ export default function GlobalImportersPage() {
 
   useEffect(() => {
     loadImporters(page);
-  }, [page, country, minScore]);
+  }, [page, country, minScore, urlCustomLabel, urlJobId, urlCountry]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -278,6 +303,38 @@ export default function GlobalImportersPage() {
           </div>
         )}
 
+        {/* Active Filter from Crawl Run Banner */}
+        {(urlCustomLabel || urlJobId || urlCountry) && (
+          <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-blue-400">
+            <div className="flex flex-wrap items-center gap-2">
+              <Filter className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="font-semibold text-slate-200">Active Crawl Filter:</span>
+              {urlCustomLabel && (
+                <span className="font-bold text-white bg-blue-500/25 px-2.5 py-0.5 rounded border border-blue-500/30">
+                  {urlCustomLabel}
+                </span>
+              )}
+              {urlJobId && (
+                <span className="text-slate-400 font-mono text-[11px]">
+                  (Job #{urlJobId})
+                </span>
+              )}
+              {urlCountry && (
+                <span className="text-slate-300">
+                  &bull; Geography: <strong className="text-white">{urlCountry}</strong>
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push('/leads/importers')}
+              className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition whitespace-nowrap ml-auto sm:ml-0"
+            >
+              <X className="w-3.5 h-3.5" /> Clear Filter
+            </button>
+          </div>
+        )}
+
         {/* Filter & Search Bar */}
         <div className={`p-3 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-3 ${
           isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 border-slate-800'
@@ -368,31 +425,84 @@ export default function GlobalImportersPage() {
                       className={`transition ${isLight ? 'hover:bg-slate-50' : 'hover:bg-slate-800/40'}`}
                     >
                       <td className="py-3 px-4">
-                        <div
-                          onClick={() => setSelectedCustomer(cust)}
-                          className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
-                            isLight ? 'text-slate-900 hover:text-blue-600' : 'text-white hover:text-blue-400'
-                          }`}
-                        >
-                          <Building2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                          <span>{cust.company_name}</span>
+                        <div className="space-y-0.5">
+                          <div
+                            onClick={() => setSelectedCustomer(cust)}
+                            className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
+                              isLight ? 'text-slate-900 hover:text-blue-600' : 'text-white hover:text-blue-400'
+                            }`}
+                          >
+                            <Building2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            <span>{cust.company_name}</span>
+                            <span title="Verified Trade Entity">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            </span>
+                          </div>
+                          {cust.website && (
+                            <a
+                              href={cust.website.startsWith('http') ? cust.website : `https://${cust.website}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 font-mono"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span className="truncate max-w-[180px]">{cust.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                            </a>
+                          )}
+                          {cust.custom_label && (
+                            <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                              <Tag className="w-2.5 h-2.5 text-slate-500" />
+                              <span>{cust.custom_label}</span>
+                            </div>
+                          )}
                         </div>
                       </td>
 
                       <td className="py-3 px-3 text-slate-400">
-                        {cust.city ? `${cust.city}, ` : ''}{cust.country}
+                        <div className="font-medium text-slate-200">
+                          {cust.city ? `${cust.city}, ` : (cust.city_or_hub ? `${cust.city_or_hub}, ` : '')}{cust.country}
+                        </div>
+                        {cust.address && (
+                          <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={cust.address}>
+                            {cust.address}
+                          </div>
+                        )}
                       </td>
 
-                      <td className="py-3 px-3 font-medium text-slate-300">
-                        {cust.contact_person || 'Commercial Buyer Desk'}
+                      <td className="py-3 px-3">
+                        <div className="font-medium text-slate-300">
+                          {cust.contact_person || 'Commercial Buyer Desk'}
+                        </div>
+                        {(cust.email || cust.emails) && (
+                          <a
+                            href={`mailto:${(cust.email || cust.emails || '').split(';')[0].trim()}`}
+                            className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[180px]"
+                          >
+                            <Mail className="w-3 h-3 text-slate-500" />
+                            <span className="truncate">{(cust.email || cust.emails || '').split(';')[0].trim()}</span>
+                          </a>
+                        )}
                       </td>
 
-                      <td className="py-3 px-3 font-mono text-slate-400">
-                        {cust.phone || 'N/A'}
+                      <td className="py-3 px-3 font-mono text-slate-300">
+                        {(cust.phone || cust.phones) ? (
+                          <div className="flex items-center gap-1 text-[11px]">
+                            <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>{(cust.phone || cust.phones || '').split(';')[0].trim()}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-600 text-[11px]">N/A</span>
+                        )}
                       </td>
 
-                      <td className="py-3 px-3 text-slate-300 max-w-[200px] truncate" title={cust.matched_varieties}>
-                        {cust.matched_varieties || 'Commodity Grains'}
+                      <td className="py-3 px-3 text-slate-300 max-w-[200px]" title={cust.matched_varieties}>
+                        <div className="truncate font-medium">{cust.matched_varieties || 'Commodity Grains'}</div>
+                        {cust.hs_codes_applicable && (
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            HS: {cust.hs_codes_applicable}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-2 text-center">
@@ -405,6 +515,11 @@ export default function GlobalImportersPage() {
                         }`}>
                           {cust.priority_score}
                         </span>
+                        {(cust.merge_count || 1) > 1 && (
+                          <div className="text-[9px] text-blue-400 font-bold mt-0.5">
+                            Merged x{cust.merge_count}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-4 text-right">
@@ -579,5 +694,22 @@ export default function GlobalImportersPage() {
         }}
       />
     </Shell>
+  );
+}
+
+export default function GlobalImportersPage() {
+  return (
+    <Suspense
+      fallback={
+        <Shell>
+          <div className="py-24 text-center text-xs text-slate-500">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-500 mx-auto mb-2" />
+            Loading Global Importers &amp; Trade Desks...
+          </div>
+        </Shell>
+      }
+    >
+      <GlobalImportersContent />
+    </Suspense>
   );
 }
