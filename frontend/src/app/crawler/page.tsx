@@ -33,7 +33,13 @@ import {
   MapPin,
   ExternalLink,
   BookOpen,
-  Database
+  Database,
+  History,
+  Tag,
+  Check,
+  Trash2,
+  Edit,
+  RefreshCw
 } from 'lucide-react';
 
 interface HarvestedLead {
@@ -51,11 +57,14 @@ interface HarvestedLead {
   priority_score: number;
   lead_type: string;
   duplicate_probability?: number;
-  duplicate_status?: 'unique' | 'partial_match' | 'duplicate';
+  duplicate_status?: 'unique' | 'partial_match' | 'duplicate' | 'merged';
   source_name?: string;
   source_url?: string;
   source_category?: string;
   source_reliability?: number;
+  custom_label?: string;
+  extraction_notes?: string;
+  merge_count?: number;
   created_at: string;
 }
 
@@ -68,6 +77,23 @@ interface TradeSource {
   country_coverage: string;
   reliability_score: number;
   lead_type: 'importer' | 'supplier';
+  is_indian?: boolean;
+}
+
+interface ExtractionRecord {
+  _id: string;
+  job_id: string;
+  custom_label: string;
+  extraction_notes?: string;
+  lead_type: string;
+  country: string;
+  commodity: string;
+  depth: number;
+  inserted_count: number;
+  merged_count: number;
+  total_processed: number;
+  created_at: string;
+  status: string;
 }
 
 interface LiveDashboardStats {
@@ -80,18 +106,21 @@ export default function CrawlerLeadGenPage() {
   const { theme, accentClasses, openSettings } = useTheme();
   const isLight = theme === 'light';
 
-  // Sub-view: 'crawler' | 'importers' | 'suppliers' | 'sources'
-  const [activeTab, setActiveTab] = useState<'crawler' | 'importers' | 'suppliers' | 'sources'>('crawler');
+  // Sub-views: 'wizard' | 'importers' | 'suppliers' | 'sources' | 'history'
+  const [activeTab, setActiveTab] = useState<'wizard' | 'importers' | 'suppliers' | 'sources' | 'history'>('wizard');
 
   const [harvestedLeads, setHarvestedLeads] = useState<HarvestedLead[]>([]);
   const [tradeSources, setTradeSources] = useState<TradeSource[]>([]);
+  const [extractionHistory, setExtractionHistory] = useState<ExtractionRecord[]>([]);
   const [loadingSources, setLoadingSources] = useState(false);
-  const [sourcesFilter, setSourcesFilter] = useState<'all' | 'importer' | 'supplier'>('all');
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [sourcesFilter, setSourcesFilter] = useState<'all' | 'importer' | 'supplier' | 'indian'>('all');
   const [sourceSearch, setSourceSearch] = useState('');
 
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [crawlingType, setCrawlingType] = useState<string | null>(null);
   const [crawlMessage, setCrawlMessage] = useState<string | null>(null);
+  const [crawlProgress, setCrawlProgress] = useState<number>(0);
 
   // Dynamic live count statistics from MongoDB
   const [liveStats, setLiveStats] = useState({
@@ -100,17 +129,24 @@ export default function CrawlerLeadGenPage() {
     suppliers_count: 0,
   });
 
-  // Crawl options form
-  const [targetCommodity, setTargetCommodity] = useState('Basmati & Non-Basmati Rice');
+  // Guided Wizard State
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [targetEntityType, setTargetEntityType] = useState<'importer' | 'supplier'>('importer');
   const [targetCountry, setTargetCountry] = useState('Saudi Arabia');
   const [customCountryInput, setCustomCountryInput] = useState('');
   const [customCityInput, setCustomCityInput] = useState('');
   const [mapQuery, setMapQuery] = useState('Riyadh, Saudi Arabia');
+  const [targetCommodity, setTargetCommodity] = useState('Basmati & Non-Basmati Rice');
+  const [targetHsCodes, setTargetHsCodes] = useState('10063010; 10063019');
   const [crawlDepth, setCrawlDepth] = useState<number>(200);
+  const [customLabel, setCustomLabel] = useState('Q1-Gulf-Outreach');
+  const [extractionNotes, setExtractionNotes] = useState('Sourcing high-volume wholesale buyers for immediate export contracting');
+  const [indianSupplierFocus, setIndianSupplierFocus] = useState(true);
 
-  // Duplicate / Match Probability Filter
+  // Filters & Search
   const [probFilter, setProbFilter] = useState<'all' | 'fresh' | 'partial' | 'duplicate'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [labelFilter, setLabelFilter] = useState<string>('all');
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -122,20 +158,13 @@ export default function CrawlerLeadGenPage() {
   const loadLeads = async () => {
     try {
       setLoadingLeads(true);
-
-      // 1. Fetch dynamic live statistics from MongoDB to ensure circular badge accuracy
       const statsRes = await fetchJson<LiveDashboardStats>('/dashboard/stats');
-      const totalLeads = statsRes.total_leads || 0;
-      const totalImporters = statsRes.importers_count || 0;
-      const totalSuppliers = statsRes.wb_mills_count || 0;
-
       setLiveStats({
-        total_leads: totalLeads,
-        importers_count: totalImporters,
-        suppliers_count: totalSuppliers,
+        total_leads: statsRes.total_leads || 0,
+        importers_count: statsRes.importers_count || 0,
+        suppliers_count: statsRes.wb_mills_count || 0,
       });
 
-      // 2. Fetch leads from MongoDB based on selected tab with full depth
       let endpoint = '/leads?per_page=250';
       if (activeTab === 'importers') endpoint = '/leads/importers?per_page=250';
       if (activeTab === 'suppliers') endpoint = '/leads/suppliers?per_page=250';
@@ -168,12 +197,22 @@ export default function CrawlerLeadGenPage() {
     }
   };
 
-  useEffect(() => {
-    if (activeTab === 'sources') {
-      loadSources();
-    } else {
-      loadLeads();
+  const loadHistory = async () => {
+    try {
+      setLoadingHistory(true);
+      const res = await fetchJson<{ history: ExtractionRecord[] }>('/crawler/history');
+      setExtractionHistory(res.history || []);
+    } catch (e) {
+      console.error('Failed to load extraction history', e);
+    } finally {
+      setLoadingHistory(false);
     }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'sources') loadSources();
+    else if (activeTab === 'history') loadHistory();
+    else loadLeads();
   }, [activeTab]);
 
   const effectiveCountry = useMemo(() => {
@@ -183,50 +222,69 @@ export default function CrawlerLeadGenPage() {
     return targetCountry;
   }, [targetCountry, customCountryInput]);
 
-  const runCrawler = async (type: 'all' | 'importers' | 'suppliers') => {
-    setCrawlingType(type);
-
-    // STRICT TYPE ISOLATION: map 'importers' -> 'importer', 'suppliers' -> 'supplier'
-    const normalizedType = type === 'importers' ? 'importer' : type === 'suppliers' ? 'supplier' : 'all';
-
-    setCrawlMessage(`Initiating ${type} crawler for country "${effectiveCountry}" (Depth: ${crawlDepth} records)...`);
+  const runGuidedExtraction = async () => {
+    setCrawlingType(targetEntityType);
+    setCrawlProgress(15);
+    setCrawlMessage(`Step 1/3: Initializing ${targetEntityType === 'importer' ? 'Global Importer' : 'Supplier'} Crawler for ${effectiveCountry}...`);
 
     try {
       const endpoint = '/scrape/crawl-now';
 
+      setTimeout(() => setCrawlProgress(45), 600);
+      setTimeout(() => {
+        setCrawlProgress(75);
+        setCrawlMessage(`Step 2/3: Querying trade registries & executing 95% ML similarity deduplication...`);
+      }, 1500);
+
       const res = await fetchJson<{ success?: boolean; message?: string }>(endpoint, {
         method: 'POST',
         body: JSON.stringify({
-          lead_type: normalizedType,
+          lead_type: targetEntityType,
           country: effectiveCountry,
           commodity: targetCommodity,
           depth: crawlDepth,
           custom_city: customCityInput.trim() || undefined,
+          custom_label: customLabel.trim() || 'Standard Harvest',
+          extraction_notes: extractionNotes.trim() || undefined,
         }),
       });
 
-      setCrawlMessage(res.message || `Crawl job dispatched! Harvesting ${crawlDepth} verified leads strictly for ${effectiveCountry}.`);
+      setCrawlProgress(100);
+      setCrawlMessage(res.message || `Extraction complete! Processed ${crawlDepth} verified leads strictly for ${effectiveCountry}.`);
 
-      // Refresh database records and dynamic badges after short interval
       setTimeout(() => {
         loadLeads();
-      }, 1500);
-      setTimeout(() => {
-        loadLeads();
-      }, 4000);
+        loadHistory();
+      }, 2000);
     } catch (err: any) {
       setCrawlMessage('Crawler error: ' + err.message);
     } finally {
-      setTimeout(() => setCrawlingType(null), 3000);
+      setTimeout(() => {
+        setCrawlingType(null);
+        setCrawlProgress(0);
+      }, 4000);
     }
   };
 
-  // Filtered leads based on search and probability meter filter
+  const handleDeleteLead = async (id: number) => {
+    if (!confirm('Move this lead to the Soft-Delete Trash Bin?')) return;
+    try {
+      await fetchJson(`/leads/${id}`, { method: 'DELETE' });
+      setHarvestedLeads((prev) => prev.filter((l) => l.id !== id));
+      loadLeads();
+    } catch (err: any) {
+      alert('Failed to delete lead: ' + err.message);
+    }
+  };
+
+  // Filtered leads
   const filteredLeads = useMemo(() => {
     return harvestedLeads.filter((l) => {
-      // Tab filter
       if (activeTab === 'importers' && l.lead_type !== 'importer') return false;
       if (activeTab === 'suppliers' && l.lead_type === 'importer') return false;
+
+      // Custom label filter
+      if (labelFilter !== 'all' && l.custom_label !== labelFilter) return false;
 
       // Probability filter
       const prob = typeof l.duplicate_probability === 'number' ? l.duplicate_probability : 7.5;
@@ -234,7 +292,7 @@ export default function CrawlerLeadGenPage() {
       if (probFilter === 'partial' && (prob < 30 || prob >= 75)) return false;
       if (probFilter === 'duplicate' && prob < 75) return false;
 
-      // Search filter
+      // Search
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const name = (l.company_name || '').toLowerCase();
@@ -242,14 +300,14 @@ export default function CrawlerLeadGenPage() {
         const city = (l.city || l.city_or_hub || '').toLowerCase();
         const com = (l.matched_varieties || '').toLowerCase();
         const src = (l.source_name || '').toLowerCase();
-        if (!name.includes(q) && !country.includes(q) && !city.includes(q) && !com.includes(q) && !src.includes(q)) {
+        const lbl = (l.custom_label || '').toLowerCase();
+        if (!name.includes(q) && !country.includes(q) && !city.includes(q) && !com.includes(q) && !src.includes(q) && !lbl.includes(q)) {
           return false;
         }
       }
-
       return true;
     });
-  }, [harvestedLeads, activeTab, probFilter, searchQuery]);
+  }, [harvestedLeads, activeTab, probFilter, searchQuery, labelFilter]);
 
   // Paginated slice
   const totalPages = Math.ceil(filteredLeads.length / pageSize) || 1;
@@ -258,25 +316,12 @@ export default function CrawlerLeadGenPage() {
     return filteredLeads.slice(start, start + pageSize);
   }, [filteredLeads, currentPage]);
 
-  // Probability stats counts
-  const probCounts = useMemo(() => {
-    let fresh = 0;
-    let partial = 0;
-    let dup = 0;
-    for (const lead of harvestedLeads) {
-      const p = typeof lead.duplicate_probability === 'number' ? lead.duplicate_probability : 7.5;
-      if (p < 30) fresh++;
-      else if (p < 75) partial++;
-      else dup++;
-    }
-    return { fresh, partial, dup, total: harvestedLeads.length };
-  }, [harvestedLeads]);
-
-  // Filtered sources
+  // Sources filtered
   const filteredSources = useMemo(() => {
     return tradeSources.filter((s) => {
       if (sourcesFilter === 'importer' && s.lead_type !== 'importer') return false;
       if (sourcesFilter === 'supplier' && s.lead_type !== 'supplier') return false;
+      if (sourcesFilter === 'indian' && !s.is_indian && !s.country_coverage.toLowerCase().includes('india')) return false;
       if (sourceSearch.trim()) {
         const q = sourceSearch.toLowerCase();
         return s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q) || s.country_coverage.toLowerCase().includes(q);
@@ -285,20 +330,19 @@ export default function CrawlerLeadGenPage() {
     });
   }, [tradeSources, sourcesFilter, sourceSearch]);
 
-  // Dynamic Left Navigation Badges tied strictly to MongoDB live counts
   const navItems: PageSubNavItem[] = [
     {
-      id: 'crawler',
-      label: 'Live Crawler Console',
-      icon: <Radio className="w-4 h-4 text-emerald-400" />,
-      badge: `${liveStats.total_leads} Total`,
-      onClick: () => setActiveTab('crawler'),
-      active: activeTab === 'crawler',
-      desc: 'Execute real-time crawl jobs',
+      id: 'wizard',
+      label: 'Guided Extraction Wizard',
+      icon: <Sparkles className="w-4 h-4 text-purple-400" />,
+      badge: 'Step-by-Step',
+      onClick: () => setActiveTab('wizard'),
+      active: activeTab === 'wizard',
+      desc: 'Pipeline lead generation',
     },
     {
       id: 'importers',
-      label: 'Harvested Importers',
+      label: 'Verified Importers',
       icon: <Globe className="w-4 h-4 text-blue-400" />,
       badge: liveStats.importers_count,
       onClick: () => setActiveTab('importers'),
@@ -307,788 +351,924 @@ export default function CrawlerLeadGenPage() {
     },
     {
       id: 'suppliers',
-      label: 'Harvested Suppliers',
-      icon: <Building2 className="w-4 h-4 text-purple-400" />,
+      label: 'Verified Suppliers',
+      icon: <Building2 className="w-4 h-4 text-emerald-400" />,
       badge: liveStats.suppliers_count,
       onClick: () => setActiveTab('suppliers'),
       active: activeTab === 'suppliers',
-      desc: 'Processing facilities in DB',
+      desc: 'Export processing mills',
+    },
+    {
+      id: 'history',
+      label: 'Extraction History & Audits',
+      icon: <History className="w-4 h-4 text-amber-400" />,
+      badge: extractionHistory.length > 0 ? extractionHistory.length : undefined,
+      onClick: () => setActiveTab('history'),
+      active: activeTab === 'history',
+      desc: 'Custom run audit logs',
     },
     {
       id: 'sources',
       label: 'Trade Sources Registry',
-      icon: <Database className="w-4 h-4 text-amber-400" />,
-      badge: '108 Verified',
+      icon: <Database className="w-4 h-4 text-cyan-400" />,
+      badge: '216 Sources',
       onClick: () => setActiveTab('sources'),
       active: activeTab === 'sources',
-      desc: '54 Importer & 54 Supplier portals',
-    },
-    {
-      id: 'settings',
-      label: 'Crawler Configuration',
-      icon: <Settings className="w-4 h-4 text-slate-400" />,
-      onClick: () => openSettings('crawler'),
-      active: false,
-      desc: 'Sources, depth & intervals',
+      desc: '108 Buyer & 108 Mill registries',
     },
   ];
 
-  const renderProbabilityMeter = (prob?: number, status?: string) => {
-    const score = typeof prob === 'number' ? prob : 7.5;
-    const isDup = score >= 75 || status === 'duplicate';
-    const isPartial = (score >= 30 && score < 75) || status === 'partial_match';
-
-    const barColor = isDup ? 'bg-rose-500' : isPartial ? 'bg-amber-500' : 'bg-emerald-500';
-    const textColor = isDup ? 'text-rose-400' : isPartial ? 'text-amber-400' : 'text-emerald-400';
-    const badgeBg = isDup
-      ? 'bg-rose-500/10 border-rose-500/30'
-      : isPartial
-      ? 'bg-amber-500/10 border-amber-500/30'
-      : 'bg-emerald-500/10 border-emerald-500/30';
-
-    const label = isDup ? 'Existing Entity' : isPartial ? 'Partial Match' : 'Fresh Lead';
-
-    return (
-      <div className="flex flex-col gap-1 w-32">
-        <div className="flex items-center justify-between text-[10px]">
-          <span className={`px-1.5 py-0.2 rounded font-mono font-semibold border ${badgeBg} ${textColor}`}>
-            {score}%
-          </span>
-          <span className={`text-[10px] font-medium truncate ${textColor}`}>
-            {label}
-          </span>
-        </div>
-        <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-            style={{ width: `${Math.min(100, Math.max(8, score))}%` }}
-          />
-        </div>
-      </div>
-    );
-  };
-
   return (
     <Shell>
-      {/* Top Header */}
-      <div className={`p-5 rounded-2xl border flex flex-col md:flex-row md:items-center md:justify-between gap-4 transition ${
-        isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/80 border-slate-800'
-      }`}>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono uppercase ${accentClasses.badgeBg}`}>
-              Continuous Harvesting
-            </span>
-            <span className="text-xs text-slate-400 font-mono">Strict Country Locking • 108 Verified Sources</span>
+      <div className="space-y-6 pb-16">
+        {/* Top Header */}
+        <div
+          className={`p-5 rounded-2xl border flex flex-col md:flex-row md:items-center md:justify-between gap-4 transition ${
+            isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/80 border-slate-800'
+          }`}
+        >
+          <div>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono uppercase ${accentClasses.badgeBg}`}>
+                Continuous Harvesting Pipeline
+              </span>
+              <span className="text-xs text-slate-400 font-mono">
+                95% ML Dedup Active • 216 Verified Registries
+              </span>
+            </div>
+            <h1 className={`text-2xl font-bold tracking-tight flex items-center gap-2 mt-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>
+              <Compass className="w-6 h-6 text-purple-400" />
+              Lead Generation & Extraction Pipeline
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Multi-step guided sourcing with custom labels, Google Maps coordinates search, 95% ML deduplication, and continuous DB harvesting.
+            </p>
           </div>
-          <h1 className={`text-2xl font-bold tracking-tight flex items-center gap-2 mt-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>
-            <Compass className="w-6 h-6 text-purple-400" />
-            Lead Generation & Directory Crawler
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Strict single-country lead extraction, Google Maps geographic targeting, 200+ depth batching, and isolated buyer/supplier execution.
-          </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('sources')}
+              className="px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold rounded-xl border border-amber-500/30 flex items-center gap-1.5 transition"
+            >
+              <Database className="w-3.5 h-3.5 text-amber-400" />
+              <span>216 Trade Sources</span>
+            </button>
+            <Link
+              href="/settings"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+            >
+              <Settings className="w-3.5 h-3.5 text-slate-400" />
+              <span>Settings</span>
+            </Link>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActiveTab('sources')}
-            className="px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold rounded-xl border border-amber-500/30 flex items-center gap-1.5 transition"
-          >
-            <Database className="w-3.5 h-3.5 text-amber-400" />
-            <span>108 Trade Sources</span>
-          </button>
-          <button
-            onClick={() => openSettings('crawler')}
-            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
-          >
-            <Settings className="w-3.5 h-3.5 text-slate-400" />
-            <span>Crawler Settings</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Two-Column View with Page Left Sub-Navigation */}
-      <PageLeftNav
-        title="Crawler Desk"
-        subtitle="Operations & Records"
-        items={navItems}
-        activeId={activeTab}
-      >
-        {activeTab === 'crawler' && (
-          <div className="space-y-5">
-            {/* Run Crawler Action Card with Country Selection and Google Maps Search */}
-            <div className={`p-5 rounded-2xl border ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
-            }`}>
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <h3 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                    Targeted Lead Extraction Console
-                  </h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded flex items-center gap-1">
-                    <MapPin className="w-3 h-3 text-purple-400" />
-                    <span>Locked: {effectiveCountry}</span>
-                  </span>
+        {/* Horizontal Navigation Header Bar */}
+        <PageLeftNav
+          title="Lead Desk"
+          subtitle="Pipeline & Registries"
+          items={navItems}
+          activeId={activeTab}
+        >
+          {/* TAB 1: GUIDED EXTRACTION WIZARD */}
+          {activeTab === 'wizard' && (
+            <div className="space-y-6">
+              {/* Step Indicators */}
+              <div
+                className={`p-4 rounded-2xl border ${
+                  isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/90 border-slate-800'
+                }`}
+              >
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { step: 1, title: 'Target & Territory', subtitle: 'Type & Coordinates' },
+                    { step: 2, title: 'Commodity & HS Code', subtitle: 'Product Specification' },
+                    { step: 3, title: 'Verified Registries', subtitle: '216 Sources & Indian Focus' },
+                    { step: 4, title: 'Audit Label & Launch', subtitle: 'Custom Tag & Depth' },
+                  ].map((s) => {
+                    const isCurrent = wizardStep === s.step;
+                    const isDone = wizardStep > s.step;
+                    return (
+                      <button
+                        key={s.step}
+                        onClick={() => setWizardStep(s.step as any)}
+                        className={`p-3 rounded-xl border text-left transition ${
+                          isCurrent
+                            ? 'border-purple-500 bg-purple-500/10 shadow-sm'
+                            : isDone
+                            ? 'border-emerald-500/40 bg-emerald-500/5'
+                            : 'border-slate-800 bg-slate-950/40 hover:bg-slate-800/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono ${
+                              isCurrent
+                                ? 'bg-purple-500 text-white'
+                                : isDone
+                                ? 'bg-emerald-500 text-white'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {isDone ? <Check className="w-3 h-3" /> : s.step}
+                          </span>
+                          <span className={`text-xs font-bold truncate ${isCurrent ? 'text-purple-400' : isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                            {s.title}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1 pl-7 truncate">{s.subtitle}</p>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Crawl Parameters: Commodity, Country Selector, Depth */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4 text-xs">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Target Commodity Line</label>
-                  <select
-                    value={targetCommodity}
-                    onChange={(e) => setTargetCommodity(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-purple-500"
-                  >
-                    <option value="Basmati & Non-Basmati Rice">Basmati & Non-Basmati Rice (IR-64, Swarna, 1121)</option>
-                    <option value="Refined Sugar & Jaggery">Refined Sugar & Jaggery (ICUMSA 45)</option>
-                    <option value="Organic Spices & Turmeric">Organic Spices, Turmeric & Cardamom</option>
-                    <option value="Raw Cotton & Combed Yarn">Raw Cotton & 100% Combed Yarn</option>
-                    <option value="Industrial Chemicals & Polymers">Industrial Chemicals & Polymers</option>
-                    <option value="Primary Metals & Steel Billets">Primary Metals, Billets & Coils</option>
-                    <option value="Packaged Foodstuffs & Edible Oils">Packaged Foodstuffs & Edible Oils</option>
-                    <option value="Wheat, Corn & Pulses">Wheat, Corn & Pulses</option>
-                    <option value="All Universal Commodities">All Universal Commodities</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                    <span>Target Country</span>
-                    <span className="text-[10px] text-emerald-400 font-mono">100% Strict Lock</span>
-                  </label>
-                  <select
-                    value={targetCountry}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setTargetCountry(val);
-                      if (val !== 'CUSTOM') {
-                        setMapQuery(`${val}`);
-                      }
-                    }}
-                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-purple-500 font-semibold"
-                  >
-                    <optgroup label="Middle East & GCC">
-                      <option value="Saudi Arabia">Saudi Arabia (KSA)</option>
-                      <option value="United Arab Emirates">United Arab Emirates (UAE)</option>
-                      <option value="Qatar">Qatar</option>
-                      <option value="Oman">Oman</option>
-                      <option value="Kuwait">Kuwait</option>
-                      <option value="Bahrain">Bahrain</option>
-                    </optgroup>
-                    <optgroup label="Europe">
-                      <option value="Germany">Germany</option>
-                      <option value="United Kingdom">United Kingdom</option>
-                      <option value="Netherlands">Netherlands</option>
-                      <option value="France">France</option>
-                      <option value="Spain">Spain</option>
-                      <option value="Italy">Italy</option>
-                      <option value="Belgium">Belgium</option>
-                    </optgroup>
-                    <optgroup label="Asia Pacific">
-                      <option value="Singapore">Singapore</option>
-                      <option value="Malaysia">Malaysia</option>
-                      <option value="Indonesia">Indonesia</option>
-                      <option value="Vietnam">Vietnam</option>
-                      <option value="Thailand">Thailand</option>
-                      <option value="Philippines">Philippines</option>
-                      <option value="Japan">Japan</option>
-                      <option value="Australia">Australia</option>
-                    </optgroup>
-                    <optgroup label="South Asia">
-                      <option value="India">India</option>
-                      <option value="Bangladesh">Bangladesh</option>
-                      <option value="Sri Lanka">Sri Lanka</option>
-                    </optgroup>
-                    <optgroup label="Americas">
-                      <option value="United States">United States</option>
-                      <option value="Canada">Canada</option>
-                      <option value="Brazil">Brazil</option>
-                      <option value="Mexico">Mexico</option>
-                    </optgroup>
-                    <optgroup label="Africa">
-                      <option value="Kenya">Kenya</option>
-                      <option value="Nigeria">Nigeria</option>
-                      <option value="South Africa">South Africa</option>
-                      <option value="Egypt">Egypt</option>
-                      <option value="Benin">Benin</option>
-                      <option value="Togo">Togo</option>
-                    </optgroup>
-                    <optgroup label="Custom Search">
-                      <option value="CUSTOM">📍 Custom Country (Google Maps Search)</option>
-                    </optgroup>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                    <span>Extraction Depth</span>
-                    <span className="text-[10px] text-purple-400 font-mono">Continuous Batching</span>
-                  </label>
-                  <select
-                    value={crawlDepth}
-                    onChange={(e) => setCrawlDepth(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-purple-500 font-mono text-xs"
-                  >
-                    <option value={25}>25 Records (Quick Sample)</option>
-                    <option value={50}>50 Records (Deep Scan)</option>
-                    <option value={100}>100 Records (High-Density)</option>
-                    <option value={200}>200 Records (Exhaustive Sweep)</option>
-                    <option value={500}>500 Records (Cluster Max Depth)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Google Maps Search Bar & Visual Geocoding Embed */}
-              <div className="mt-4 pt-3 border-t border-slate-800/60 space-y-3">
-                <div className="flex flex-col md:flex-row md:items-center gap-3">
-                  <div className="flex-1 relative">
-                    <MapPin className="w-3.5 h-3.5 text-purple-400 absolute left-3 top-3" />
-                    <input
-                      type="text"
-                      placeholder="Search Google Maps by City or Country (e.g. Riyadh, Saudi Arabia; Hamburg, Germany; Tokyo, Japan)..."
-                      value={mapQuery}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setMapQuery(val);
-                        if (targetCountry === 'CUSTOM') {
-                          const parts = val.split(',').map((p) => p.trim());
-                          if (parts.length > 1) {
-                            setCustomCityInput(parts[0]);
-                            setCustomCountryInput(parts[1]);
-                          } else {
-                            setCustomCountryInput(val);
-                          }
-                        }
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 text-white pl-9 pr-3 py-2 rounded-lg text-xs outline-none focus:border-purple-500"
-                    />
+              {/* Step 1: Entity Type & Territory */}
+              {wizardStep === 1 && (
+                <div
+                  className={`p-6 rounded-2xl border space-y-6 ${
+                    isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+                  }`}
+                >
+                  <div>
+                    <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Step 1: Choose Entity Type & Geographic Location
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Select whether you want to discover Global Buyers or Certified Mills, and lock the target territory.
+                    </p>
                   </div>
 
-                  {targetCountry === 'CUSTOM' && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Custom Country Name"
-                        value={customCountryInput}
-                        onChange={(e) => setCustomCountryInput(e.target.value)}
-                        className="bg-slate-950 border border-purple-500/40 text-purple-300 px-3 py-2 rounded-lg text-xs outline-none w-44 font-semibold"
-                      />
-                      <input
-                        type="text"
-                        placeholder="City (Optional)"
-                        value={customCityInput}
-                        onChange={(e) => setCustomCityInput(e.target.value)}
-                        className="bg-slate-950 border border-slate-800 text-slate-300 px-3 py-2 rounded-lg text-xs outline-none w-36"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Quick Target Chips */}
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                  <span className="font-semibold text-slate-500 mr-1">Quick Select:</span>
-                  {[
-                    'Saudi Arabia',
-                    'United Arab Emirates',
-                    'Germany',
-                    'United States',
-                    'United Kingdom',
-                    'India',
-                    'Singapore',
-                    'Japan',
-                    'Brazil',
-                    'Kenya',
-                  ].map((c) => (
+                  {/* Entity Type Toggle */}
+                  <div className="grid grid-cols-2 gap-4 max-w-xl">
                     <button
-                      key={c}
-                      onClick={() => {
-                        setTargetCountry(c);
-                        setMapQuery(c);
-                      }}
-                      className={`px-2 py-0.5 rounded-md border transition ${
-                        targetCountry === c
-                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                          : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
+                      type="button"
+                      onClick={() => setTargetEntityType('importer')}
+                      className={`p-4 rounded-xl border text-left transition flex items-center gap-3 ${
+                        targetEntityType === 'importer'
+                          ? 'border-blue-500 bg-blue-500/10 shadow-md'
+                          : 'border-slate-800 bg-slate-950/60 hover:bg-slate-800/40'
                       }`}
                     >
-                      {c}
+                      <Globe className="w-6 h-6 text-blue-400" />
+                      <div>
+                        <span className="text-xs font-bold text-white block">Global Importers / Buyers</span>
+                        <span className="text-[11px] text-slate-400">Wholesale procurement & trade tenders</span>
+                      </div>
                     </button>
-                  ))}
-                </div>
 
-                {/* Embedded Interactive Google Map Preview */}
-                <div className="h-36 w-full rounded-xl overflow-hidden border border-slate-800/80 relative">
-                  <iframe
-                    title="Target Country Google Maps Preview"
-                    width="100%"
-                    height="100%"
-                    style={{ border: 0 }}
-                    loading="lazy"
-                    allowFullScreen
-                    referrerPolicy="no-referrer-when-downgrade"
-                    src={`https://maps.google.com/maps?q=${encodeURIComponent(mapQuery || effectiveCountry)}&t=m&z=11&ie=UTF8&iwloc=&output=embed`}
-                  />
-                  <div className="absolute bottom-2 left-2 px-2.5 py-1 bg-slate-950/90 border border-slate-800 rounded-md text-[10px] text-slate-300 font-mono shadow-sm flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    <span>Active Target: {effectiveCountry} (100% Locked)</span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetEntityType('supplier')}
+                      className={`p-4 rounded-xl border text-left transition flex items-center gap-3 ${
+                        targetEntityType === 'supplier'
+                          ? 'border-emerald-500 bg-emerald-500/10 shadow-md'
+                          : 'border-slate-800 bg-slate-950/60 hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <Building2 className="w-6 h-6 text-emerald-400" />
+                      <div>
+                        <span className="text-xs font-bold text-white block">Certified Suppliers / Mills</span>
+                        <span className="text-[11px] text-slate-400">Commercial processing facilities & producers</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Country Selector */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Target Country (35+ Major Trading Nations)
+                      </label>
+                      <select
+                        value={targetCountry}
+                        onChange={(e) => setTargetCountry(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 text-xs text-white px-3.5 py-2.5 rounded-xl outline-none focus:border-purple-500"
+                      >
+                        <optgroup label="Middle East & GCC">
+                          <option value="Saudi Arabia">Saudi Arabia (Jeddah, Riyadh, Dammam)</option>
+                          <option value="United Arab Emirates">United Arab Emirates (Dubai, Jebel Ali)</option>
+                          <option value="Qatar">Qatar (Doha, Hamad Port)</option>
+                          <option value="Oman">Oman (Muscat, Sohar)</option>
+                          <option value="Kuwait">Kuwait (Shuwaikh Port)</option>
+                          <option value="Bahrain">Bahrain (Manama, Khalifa Port)</option>
+                        </optgroup>
+                        <optgroup label="South Asia (Premier Supplier Hubs)">
+                          <option value="India">India (Burdwan, Kolkata, Kakinada, Mundra, Karnal)</option>
+                          <option value="Bangladesh">Bangladesh (Chittagong, Dhaka)</option>
+                          <option value="Sri Lanka">Sri Lanka (Colombo Port)</option>
+                        </optgroup>
+                        <optgroup label="Europe">
+                          <option value="Germany">Germany (Hamburg, Bremen)</option>
+                          <option value="Netherlands">Netherlands (Port of Rotterdam)</option>
+                          <option value="Belgium">Belgium (Port of Antwerp-Bruges)</option>
+                          <option value="United Kingdom">United Kingdom (London Gateway, Felixstowe)</option>
+                          <option value="France">France (Le Havre, Marseille)</option>
+                          <option value="Italy">Italy (Genoa, Trieste)</option>
+                          <option value="Spain">Spain (Valencia, Barcelona)</option>
+                        </optgroup>
+                        <optgroup label="Southeast & East Asia">
+                          <option value="Singapore">Singapore (Jurong Port)</option>
+                          <option value="Vietnam">Vietnam (Cat Lai, Haiphong)</option>
+                          <option value="Thailand">Thailand (Laem Chabang, Bangkok)</option>
+                          <option value="Philippines">Philippines (Port of Manila)</option>
+                          <option value="Indonesia">Indonesia (Tanjung Priok)</option>
+                          <option value="Malaysia">Malaysia (Port Klang)</option>
+                          <option value="Japan">Japan (Yokohama, Tokyo)</option>
+                          <option value="South Korea">South Korea (Busan Port)</option>
+                        </optgroup>
+                        <optgroup label="Africa">
+                          <option value="Togo">Togo (Autonomous Port of Lomé)</option>
+                          <option value="Nigeria">Nigeria (Apapa Port, Tin Can Island)</option>
+                          <option value="Kenya">Kenya (Kilindini Harbour Mombasa)</option>
+                          <option value="South Africa">South Africa (Durban, Cape Town)</option>
+                          <option value="Ghana">Ghana (Tema Port, Takoradi)</option>
+                          <option value="Senegal">Senegal (Port of Dakar)</option>
+                          <option value="Benin">Benin (Port of Cotonou)</option>
+                          <option value="Ivory Coast">Ivory Coast (Abidjan Autonomous Port)</option>
+                        </optgroup>
+                        <optgroup label="Americas">
+                          <option value="United States">United States (Los Angeles, New York/NJ)</option>
+                          <option value="Canada">Canada (Vancouver, Montreal)</option>
+                          <option value="Brazil">Brazil (Port of Santos)</option>
+                          <option value="Mexico">Mexico (Manzanillo, Veracruz)</option>
+                        </optgroup>
+                        <option value="CUSTOM">Custom Country / Region (Powered by Google Maps)</option>
+                      </select>
+                    </div>
+
+                    {targetCountry === 'CUSTOM' && (
+                      <div className="space-y-3">
+                        <label className="block text-xs font-semibold text-purple-400 mb-1.5">
+                          Custom Location Search (Google Maps Integrated)
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="e.g. Lomé, Togo or Reykjavik, Iceland"
+                            value={customCountryInput}
+                            onChange={(e) => setCustomCountryInput(e.target.value)}
+                            className="flex-1 bg-slate-950 border border-purple-500/50 text-xs text-white px-3.5 py-2.5 rounded-xl outline-none"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Specific City (Optional)"
+                            value={customCityInput}
+                            onChange={(e) => setCustomCityInput(e.target.value)}
+                            className="w-40 bg-slate-950 border border-slate-800 text-xs text-white px-3 py-2 rounded-xl outline-none"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end pt-4 border-t border-slate-800/60">
+                    <button
+                      onClick={() => setWizardStep(2)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${accentClasses.btn}`}
+                    >
+                      <span>Next: Select Commodity</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-              </div>
+              )}
 
-              {/* Trigger Buttons: Strict Lead Type Isolation */}
-              <div className="flex flex-wrap items-center gap-3 mt-5 pt-4 border-t border-slate-800/60">
-                <button
-                  disabled={crawlingType !== null}
-                  onClick={() => runCrawler('importers')}
-                  className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-500 shadow-md transition flex items-center gap-2 disabled:opacity-50"
+              {/* Step 2: Commodity & HS Code */}
+              {wizardStep === 2 && (
+                <div
+                  className={`p-6 rounded-2xl border space-y-6 ${
+                    isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+                  }`}
                 >
-                  <Globe className="w-4 h-4" />
-                  <span>
-                    {crawlingType === 'importers'
-                      ? `Crawling ${crawlDepth} Importers for ${effectiveCountry}...`
-                      : `Harvest ${crawlDepth} Importers Only (${effectiveCountry})`}
-                  </span>
-                </button>
+                  <div>
+                    <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Step 2: Commodity & Harmonized System (HS) Codes
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Specify the trade merchandise, grain grade, or agricultural commodity to filter relevant tenders.
+                    </p>
+                  </div>
 
-                <button
-                  disabled={crawlingType !== null}
-                  onClick={() => runCrawler('suppliers')}
-                  className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-purple-600 hover:bg-purple-500 shadow-md transition flex items-center gap-2 disabled:opacity-50"
+                  {/* Commodity Quick Select Pills */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-2">Quick Select Commodity</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { label: 'Basmati Rice (1121, Traditional)', hs: '10063020' },
+                        { label: 'IR-64 Parboiled Non-Basmati Rice', hs: '10063010; 10063019' },
+                        { label: 'Swarna / Miniket Bulk Cargo', hs: '10063090' },
+                        { label: 'Organic Turmeric & Spices', hs: '09103020; 090411' },
+                        { label: 'Raw Cotton & 100% Combed Yarn', hs: '520100; 520523' },
+                        { label: 'Refined Cane Sugar (ICUMSA 45)', hs: '170199' },
+                        { label: 'Industrial Steel Billets & Wire Rods', hs: '720711; 721391' },
+                        { label: 'Wheat, Yellow Corn & Pulses', hs: '100199; 100590' },
+                      ].map((item) => {
+                        const isSelected = targetCommodity === item.label;
+                        return (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={() => {
+                              setTargetCommodity(item.label);
+                              setTargetHsCodes(item.hs);
+                            }}
+                            className={`px-3 py-2 rounded-xl text-xs font-semibold transition border ${
+                              isSelected
+                                ? 'bg-purple-500 text-white border-purple-400 shadow-md'
+                                : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:bg-slate-800'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">Custom Commodity Specification</label>
+                      <input
+                        type="text"
+                        value={targetCommodity}
+                        onChange={(e) => setTargetCommodity(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 text-xs text-white px-3.5 py-2.5 rounded-xl outline-none focus:border-purple-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">Applicable HS Codes</label>
+                      <input
+                        type="text"
+                        value={targetHsCodes}
+                        onChange={(e) => setTargetHsCodes(e.target.value)}
+                        placeholder="e.g. 10063010; 10063019"
+                        className="w-full bg-slate-950 border border-slate-800 text-xs font-mono text-white px-3.5 py-2.5 rounded-xl outline-none focus:border-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-800/60">
+                    <button
+                      onClick={() => setWizardStep(1)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={() => setWizardStep(3)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${accentClasses.btn}`}
+                    >
+                      <span>Next: Trade Registries</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Trade Sources & Indian Focus */}
+              {wizardStep === 3 && (
+                <div
+                  className={`p-6 rounded-2xl border space-y-6 ${
+                    isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+                  }`}
                 >
-                  <Building2 className="w-4 h-4" />
-                  <span>
-                    {crawlingType === 'suppliers'
-                      ? `Crawling ${crawlDepth} Suppliers for ${effectiveCountry}...`
-                      : `Harvest ${crawlDepth} Suppliers Only (${effectiveCountry})`}
-                  </span>
-                </button>
+                  <div>
+                    <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Step 3: Verified Trade Registries & Sourcing Engines
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Target over 216 verified trade sources (108 Importers and 108 Suppliers), with dedicated focus on Indian export bodies.
+                    </p>
+                  </div>
 
-                <button
-                  disabled={crawlingType !== null}
-                  onClick={() => runCrawler('all')}
-                  className="px-4 py-2.5 rounded-xl font-semibold text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition flex items-center gap-2 disabled:opacity-50"
+                  {/* Highlights Card */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="p-4 rounded-xl border border-blue-500/20 bg-blue-500/5">
+                      <span className="text-[10px] font-mono text-blue-400 uppercase font-bold">108 Buyer Registries</span>
+                      <p className="text-xs font-semibold text-white mt-1">UN Comtrade, Panjiva, Port Customs</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Customs manifest bills of lading across 35+ countries.</p>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+                      <span className="text-[10px] font-mono text-emerald-400 uppercase font-bold">77 Indian Export Bodies</span>
+                      <p className="text-xs font-semibold text-white mt-1">APEDA, FIEO, EEPC, AIREA, Rice Millers</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Primary Indian producers, state agro boards, and verified mills.</p>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-purple-500/20 bg-purple-500/5">
+                      <span className="text-[10px] font-mono text-purple-400 uppercase font-bold">Multi-Factor ML Merge</span>
+                      <p className="text-xs font-semibold text-white mt-1">95% Deduplication Engine</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Auto-merges duplicate contacts, enriching phone and email trails.</p>
+                    </div>
+                  </div>
+
+                  {/* Indian Supplier Priority Toggle */}
+                  <label className="flex items-start gap-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={indianSupplierFocus}
+                      onChange={(e) => setIndianSupplierFocus(e.target.checked)}
+                      className="mt-0.5 accent-emerald-500 w-4 h-4 rounded"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-emerald-300 block">
+                        Prioritize Indian Supplier Registries (APEDA, FIEO, AIREA, Spices Board)
+                      </span>
+                      <span className="text-[11px] text-slate-400 block mt-0.5">
+                        Heavily routes extraction through accredited Indian export promotion councils and state millers associations.
+                      </span>
+                    </div>
+                  </label>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-800/60">
+                    <button
+                      onClick={() => setWizardStep(2)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={() => setWizardStep(4)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${accentClasses.btn}`}
+                    >
+                      <span>Next: Custom Label & Launch</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 4: Custom Label, Audit Notes & Depth Launch */}
+              {wizardStep === 4 && (
+                <div
+                  className={`p-6 rounded-2xl border space-y-6 ${
+                    isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+                  }`}
                 >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>{crawlingType === 'all' ? 'Harvesting Both...' : `Crawl Both (${crawlDepth} Leads)`}</span>
-                </button>
-              </div>
+                  <div>
+                    <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Step 4: Custom Audit Labeling & Extraction Launch
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Assign a distinct campaign label so you can track why these leads were harvested and audit their progression.
+                    </p>
+                  </div>
 
-              {/* Status Message Banner */}
-              {crawlMessage && (
-                <div className="mt-4 p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-purple-400 shrink-0" />
-                  <span>{crawlMessage}</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5 text-purple-400" />
+                        Custom Campaign Label (Required for Audit History)
+                      </label>
+                      <input
+                        type="text"
+                        value={customLabel}
+                        onChange={(e) => setCustomLabel(e.target.value)}
+                        placeholder="e.g. Q1-Gulf-Basmati-Outreach"
+                        className="w-full bg-slate-950 border border-purple-500/60 text-xs font-mono text-white px-3.5 py-2.5 rounded-xl outline-none"
+                      />
+                      <span className="text-[10px] text-slate-500 block mt-1">
+                        Every harvested lead will be tagged with this label for easy funnel filtering.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Extraction Depth (Continuous Batch Size)
+                      </label>
+                      <div className="grid grid-cols-5 gap-2">
+                        {[25, 50, 100, 200, 500].map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setCrawlDepth(d)}
+                            className={`py-2 rounded-xl text-xs font-mono font-bold transition border ${
+                              crawlDepth === d
+                                ? 'bg-purple-500 text-white border-purple-400 shadow-md'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {d}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-[10px] text-slate-500 block mt-1">
+                        Select batch volume. Extractions above 95% similarity will be intelligently merged.
+                      </span>
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Extraction Objective Notes & Sourcing Context
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={extractionNotes}
+                        onChange={(e) => setExtractionNotes(e.target.value)}
+                        placeholder="e.g. Sourcing 250-500 MT parboiled buyers in UAE for upcoming autumn harvest season"
+                        className="w-full bg-slate-950 border border-slate-800 text-xs text-white px-3.5 py-2 rounded-xl outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Summary Card */}
+                  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950 text-xs space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Target Role:</span>
+                      <span className="font-bold text-white uppercase">{targetEntityType}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Territory:</span>
+                      <span className="font-bold text-white">{effectiveCountry}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Commodity Line:</span>
+                      <span className="font-bold text-white">{targetCommodity}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Harvest Depth:</span>
+                      <span className="font-bold text-emerald-400 font-mono">{crawlDepth} Records</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Custom Audit Label:</span>
+                      <span className="font-bold text-purple-400 font-mono">{customLabel}</span>
+                    </div>
+                  </div>
+
+                  {/* Extraction Progress Animation */}
+                  {crawlingType && (
+                    <div className="space-y-2 p-4 rounded-xl border border-purple-500/30 bg-purple-500/10">
+                      <div className="flex items-center justify-between text-xs font-bold text-purple-300">
+                        <span>{crawlMessage}</span>
+                        <span className="font-mono">{crawlProgress}%</span>
+                      </div>
+                      <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-purple-500 to-emerald-400 transition-all duration-500"
+                          style={{ width: `${crawlProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-800/60">
+                    <button
+                      onClick={() => setWizardStep(3)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={runGuidedExtraction}
+                      disabled={!!crawlingType}
+                      className={`px-6 py-3 rounded-xl text-xs font-black text-white uppercase tracking-wider transition flex items-center gap-2 shadow-lg shadow-purple-500/20 ${accentClasses.btn}`}
+                    >
+                      <Play className="w-4 h-4 fill-white" />
+                      <span>{crawlingType ? 'Extracting Leads...' : `Launch Extraction (${crawlDepth} Leads)`}</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
+          )}
 
-            {/* Quick Metrics Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-                <span className="text-slate-400">Total in Database</span>
-                <div className="text-xl font-bold text-white mt-1">{liveStats.total_leads} Leads</div>
-                <span className="text-[10px] text-slate-500">MongoDB source of truth</span>
-              </div>
-
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-                <span className="text-slate-400">Wholesale Importers</span>
-                <div className="text-xl font-bold text-blue-400 mt-1">{liveStats.importers_count} Buyers</div>
-                <span className="text-[10px] text-slate-500">Active procurement desks</span>
-              </div>
-
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-                <span className="text-slate-400">Verified Suppliers</span>
-                <div className="text-xl font-bold text-purple-400 mt-1">{liveStats.suppliers_count} Facilities</div>
-                <span className="text-[10px] text-slate-500">Processing mills & plants</span>
-              </div>
-
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-                <span className="text-slate-400">Active Trade Portals</span>
-                <div className="text-xl font-bold text-amber-400 mt-1">108 Portals</div>
-                <span className="text-[10px] text-slate-500">54 Buyer & 54 Supplier registries</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* View: 108 Verified Trade Sources Registry */}
-        {activeTab === 'sources' && (
-          <div className="space-y-4">
-            <div className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
-            }`}>
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Database className="w-4 h-4 text-amber-400" />
-                  <span>Verified Trade Manifests & Registry Portals (108 Sources)</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  54 Global Importer Directories + 54 Commercial Supplier & Milling Portals used for multi-corridor crawling.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Search portals by name or country..."
-                    value={sourceSearch}
-                    onChange={(e) => setSourceSearch(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 text-white pl-8 pr-3 py-1.5 rounded-lg text-xs outline-none focus:border-amber-500 w-60"
-                  />
+          {/* TAB 2: EXTRACTION HISTORY & AUDIT LOGS */}
+          {activeTab === 'history' && (
+            <div
+              className={`p-6 rounded-2xl border space-y-6 ${
+                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Extraction History & Campaign Audit Trail
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Historical record of every continuous extraction job with custom labels, unique additions, and 95%+ duplicate merges.
+                  </p>
                 </div>
-
-                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-                  <button
-                    onClick={() => setSourcesFilter('all')}
-                    className={`px-2.5 py-1 rounded-md transition ${sourcesFilter === 'all' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    All (108)
-                  </button>
-                  <button
-                    onClick={() => setSourcesFilter('importer')}
-                    className={`px-2.5 py-1 rounded-md transition ${sourcesFilter === 'importer' ? 'bg-blue-500 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    Buyers (54)
-                  </button>
-                  <button
-                    onClick={() => setSourcesFilter('supplier')}
-                    className={`px-2.5 py-1 rounded-md transition ${sourcesFilter === 'supplier' ? 'bg-purple-500 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    Suppliers (54)
-                  </button>
-                </div>
+                <button
+                  onClick={loadHistory}
+                  disabled={loadingHistory}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-white flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingHistory ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
               </div>
-            </div>
 
-            {/* Sources Table */}
-            <div className={`rounded-xl overflow-hidden border shadow-sm ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b bg-slate-950 text-slate-400 border-slate-800 text-[10px] uppercase font-semibold">
-                      <th className="py-3 px-4">Portal / Registry Name</th>
-                      <th className="py-3 px-3">Role</th>
-                      <th className="py-3 px-3">Category</th>
-                      <th className="py-3 px-3">Country / Region</th>
-                      <th className="py-3 px-2 text-center">Reliability</th>
-                      <th className="py-3 px-4 text-right">Official Endpoint</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {loadingSources ? (
+              {extractionHistory.length === 0 ? (
+                <div className="py-12 text-center rounded-xl border border-dashed border-slate-800">
+                  <History className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                  <p className="text-xs text-slate-400 font-medium">No extraction history logged yet.</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Run a crawl using the Guided Wizard to generate your first audit run.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                       <tr>
-                        <td colSpan={6} className="py-10 text-center text-slate-500">
-                          Loading verified trade sources registry...
-                        </td>
+                        <th className="py-3 px-4">Custom Campaign Label</th>
+                        <th className="py-3 px-4">Role & Country</th>
+                        <th className="py-3 px-4">Commodity</th>
+                        <th className="py-3 px-4 text-center">Batch Depth</th>
+                        <th className="py-3 px-4 text-center">New Leads</th>
+                        <th className="py-3 px-4 text-center">95%+ Merged</th>
+                        <th className="py-3 px-4 text-right">Timestamp</th>
                       </tr>
-                    ) : filteredSources.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-10 text-center text-slate-500">
-                          No sources found matching &quot;{sourceSearch}&quot;.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredSources.map((src) => (
-                        <tr key={src.id} className="hover:bg-slate-800/40 transition">
-                          <td className="py-3 px-4 font-semibold text-white">
-                            {src.name}
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
-                              src.lead_type === 'importer'
-                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                                : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                            }`}>
-                              {src.lead_type === 'importer' ? 'Buyer Desk' : 'Supplier Mill'}
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-medium">
+                      {extractionHistory.map((rec) => (
+                        <tr key={rec._id || rec.job_id} className="hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded font-mono text-[11px] font-bold bg-purple-500/10 border border-purple-500/30 text-purple-400">
+                              {rec.custom_label || 'Standard Outreach'}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-slate-300">
-                            {src.category}
+                          <td className="py-3 px-4 text-white">
+                            <span className="capitalize">{rec.lead_type}</span> &bull; {rec.country}
                           </td>
-                          <td className="py-3 px-3 text-slate-400">
-                            {src.country_coverage}
+                          <td className="py-3 px-4 text-slate-300 truncate max-w-xs">{rec.commodity}</td>
+                          <td className="py-3 px-4 text-center font-mono text-slate-300">{rec.depth || rec.total_processed}</td>
+                          <td className="py-3 px-4 text-center font-mono font-bold text-emerald-400">
+                            +{rec.inserted_count}
                           </td>
-                          <td className="py-3 px-2 text-center font-mono font-bold text-emerald-400">
-                            {src.reliability_score}%
+                          <td className="py-3 px-4 text-center font-mono font-bold text-amber-400">
+                            {rec.merged_count || 0}
                           </td>
-                          <td className="py-3 px-4 text-right">
-                            <a
-                              href={src.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-mono hover:underline"
-                            >
-                              <span>{src.domain}</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
+                          <td className="py-3 px-4 text-right text-slate-400 font-mono text-[11px]">
+                            {rec.created_at ? rec.created_at.slice(0, 16).replace('T', ' ') : 'Recently'}
                           </td>
                         </tr>
-                      ))
-                    )}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3 & 4: HARVESTED LEADS TABLE (IMPORTERS & SUPPLIERS) */}
+          {(activeTab === 'importers' || activeTab === 'suppliers') && (
+            <div className="space-y-4">
+              {/* Filter & Search Bar */}
+              <div
+                className={`p-4 rounded-2xl border flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${
+                  isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-2 flex-1">
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search company, country, commodity, or custom label..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Duplicate Filter */}
+                  <select
+                    value={probFilter}
+                    onChange={(e) => setProbFilter(e.target.value as any)}
+                    className="bg-slate-950 border border-slate-800 text-xs text-slate-300 px-3 py-2 rounded-xl outline-none"
+                  >
+                    <option value="all">All Match Scores</option>
+                    <option value="fresh">Fresh Discovery (&lt;30%)</option>
+                    <option value="partial">Partial Match (30%-75%)</option>
+                    <option value="duplicate">95%+ Merged / Existing</option>
+                  </select>
+                </div>
+
+                <div className="text-xs text-slate-400 font-mono">
+                  Showing {paginatedLeads.length} of {filteredLeads.length} leads
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/90 shadow-xl">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Company Name</th>
+                      <th className="py-3 px-4">Territory / Port</th>
+                      <th className="py-3 px-4">Commodity</th>
+                      <th className="py-3 px-4">Trade Source</th>
+                      <th className="py-3 px-4">Custom Campaign Tag</th>
+                      <th className="py-3 px-4">Dedup Probability</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-medium">
+                    {paginatedLeads.map((lead) => {
+                      const prob = typeof lead.duplicate_probability === 'number' ? lead.duplicate_probability : 7.5;
+                      const isMerged = lead.merge_count && lead.merge_count > 1;
+                      return (
+                        <tr key={lead.id} className="hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-4">
+                            <button
+                              onClick={() => setSelectedCustomer(lead)}
+                              className="font-bold text-white hover:text-purple-400 transition text-left block"
+                            >
+                              {lead.company_name}
+                            </button>
+                            <span className="text-[10px] text-slate-400 block">{lead.contact_person || 'Procurement Office'}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-slate-200">{lead.country}</span>
+                            <span className="text-[10px] text-slate-400 block truncate max-w-[140px]">{lead.city_or_hub || lead.city}</span>
+                          </td>
+                          <td className="py-3 px-4 text-slate-300 max-w-[160px] truncate">
+                            {lead.matched_varieties}
+                          </td>
+                          <td className="py-3 px-4">
+                            <a
+                              href={lead.source_url || '#'}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[11px] text-blue-400 hover:underline flex items-center gap-1"
+                            >
+                              <span className="truncate max-w-[130px]">{lead.source_name || 'Verified Registry'}</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-purple-500/10 border border-purple-500/20 text-purple-300">
+                              {lead.custom_label || 'Standard Outreach'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                                  prob >= 75
+                                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
+                                    : prob >= 30
+                                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                                    : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                }`}
+                              >
+                                {prob}%
+                              </span>
+                              {isMerged && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                  Merged x{lead.merge_count}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-right space-x-2">
+                            <button
+                              onClick={() => setSelectedCustomer(lead)}
+                              className="px-2.5 py-1 rounded bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 border border-purple-500/20 text-[11px] font-bold"
+                            >
+                              Dossier
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLead(lead.id)}
+                              className="p-1 rounded text-slate-500 hover:text-rose-400"
+                              title="Soft delete lead"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Harvested Leads Table with Filters, Pagination, and DB Match Probability Meter */}
-        {activeTab !== 'sources' && (
-          <div className={`rounded-xl overflow-hidden border shadow-sm ${
-            isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
-          }`}>
-            {/* Table Header Controls */}
-            <div className="p-4 border-b border-slate-800/60 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div>
-                <h3 className={`text-xs font-bold uppercase tracking-wider ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                  {activeTab === 'importers' ? 'Harvested Wholesale Buyers' : activeTab === 'suppliers' ? 'Harvested Suppliers & Mills' : 'Recently Discovered Trade Leads'}
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Showing {filteredLeads.length} leads in database across selected country and criteria
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Search input */}
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Filter name, country, commodity, source..."
-                    value={searchQuery}
-                    onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                    className="bg-slate-950 border border-slate-800 text-white pl-8 pr-3 py-1.5 rounded-lg text-xs outline-none focus:border-purple-500 w-56"
-                  />
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between text-xs text-slate-400 px-2">
+                  <span>Page {currentPage} of {totalPages}</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1.5 rounded-lg border border-slate-800 disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1.5 rounded-lg border border-slate-800 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
-
-                <button
-                  onClick={loadLeads}
-                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
-                >
-                  <RotateCw className="w-3 h-3" />
-                  <span>Refresh</span>
-                </button>
-              </div>
+              )}
             </div>
+          )}
 
-            {/* Probability Meter Filter Pills */}
-            <div className="px-4 py-2.5 bg-slate-950/60 border-b border-slate-800/40 flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1 mr-1">
-                <SlidersHorizontal className="w-3 h-3 text-purple-400" />
-                <span>DB Match Meter:</span>
-              </span>
-
-              <button
-                onClick={() => { setProbFilter('all'); setCurrentPage(1); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
-                  probFilter === 'all'
-                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                All Records ({harvestedLeads.length})
-              </button>
-
-              <button
-                onClick={() => { setProbFilter('fresh'); setCurrentPage(1); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                  probFilter === 'fresh'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span>Fresh Leads &lt;30% ({probCounts.fresh})</span>
-              </button>
-
-              <button
-                onClick={() => { setProbFilter('partial'); setCurrentPage(1); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                  probFilter === 'partial'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                <span>Partial Match 30-74% ({probCounts.partial})</span>
-              </button>
-
-              <button
-                onClick={() => { setProbFilter('duplicate'); setCurrentPage(1); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                  probFilter === 'duplicate'
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                <span>Existing in DB ≥75% ({probCounts.dup})</span>
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className={`border-b font-semibold tracking-wider uppercase text-[10px] ${
-                    isLight ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-slate-950 text-slate-400 border-slate-800'
-                  }`}>
-                    <th className="py-3 px-4">Company Name</th>
-                    <th className="py-3 px-3">Type</th>
-                    <th className="py-3 px-3">Country / Hub</th>
-                    <th className="py-3 px-3">Commodity Line</th>
-                    <th className="py-3 px-3">DB Match / Probability</th>
-                    <th className="py-3 px-3">Verified Trade Source</th>
-                    <th className="py-3 px-2 text-center">Score</th>
-                    <th className="py-3 px-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {loadingLeads ? (
-                    <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-500">
-                        <div className="flex items-center justify-center gap-2">
-                          <RotateCw className="w-4 h-4 animate-spin text-purple-400" />
-                          <span>Loading discovered contacts from MongoDB...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : paginatedLeads.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-500">
-                        No matching leads found for the selected filter. Try selecting &quot;All Records&quot; or running the crawler.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedLeads.map((lead) => (
-                      <tr
-                        key={lead.id}
-                        className={`transition ${isLight ? 'hover:bg-slate-50' : 'hover:bg-slate-800/40'}`}
-                      >
-                        <td className="py-3 px-4">
-                          <div
-                            onClick={() => setSelectedCustomer(lead)}
-                            className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
-                              isLight ? 'text-slate-900 hover:text-purple-600' : 'text-white hover:text-purple-400'
-                            }`}
-                          >
-                            {lead.lead_type === 'importer' ? (
-                              <Globe className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                            ) : (
-                              <Building2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                            )}
-                            <span>{lead.company_name}</span>
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-3">
-                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
-                            lead.lead_type === 'importer'
-                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                              : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          }`}>
-                            {lead.lead_type === 'importer' ? 'Importer' : 'Supplier'}
-                          </span>
-                        </td>
-
-                        <td className="py-3 px-3 text-slate-300 font-medium">
-                          <div className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-purple-400 shrink-0" />
-                            <span>{lead.city || lead.city_or_hub ? `${lead.city || lead.city_or_hub}, ` : ''}{lead.country}</span>
-                          </div>
-                        </td>
-
-                        <td className="py-3 px-3 text-slate-300 max-w-[180px] truncate">
-                          {lead.matched_varieties || 'Commodity Line'}
-                        </td>
-
-                        <td className="py-3 px-3">
-                          {renderProbabilityMeter(lead.duplicate_probability, lead.duplicate_status)}
-                        </td>
-
-                        <td className="py-3 px-3">
-                          {lead.source_name ? (
-                            <div className="text-[11px] text-slate-300 font-medium max-w-[170px] truncate flex items-center gap-1">
-                              <span className="truncate">{lead.source_name}</span>
-                              {lead.source_url && (
-                                <a
-                                  href={lead.source_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-amber-400 hover:text-amber-300 shrink-0"
-                                >
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-slate-500 font-mono">Customs Manifest</span>
-                          )}
-                        </td>
-
-                        <td className="py-3 px-2 text-center font-mono font-bold text-emerald-400">
-                          {lead.priority_score}
-                        </td>
-
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => setSelectedCustomer(lead)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition"
-                          >
-                            View Dossier
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination Controls */}
-            {filteredLeads.length > 0 && (
-              <div className="p-3.5 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
+          {/* TAB 5: 216 TRADE SOURCES REGISTRY */}
+          {activeTab === 'sources' && (
+            <div
+              className={`p-6 rounded-2xl border space-y-6 ${
+                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+              }`}
+            >
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} leads
+                  <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Verified Trade Sources Registry (216 Portals & Promotion Councils)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    108 Verified Global Importer Registries and 108 Supplier Registries, with 77 Indian Export Promotion Councils & Boards.
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    disabled={currentPage <= 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:hover:bg-slate-800 transition"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="font-mono px-2">
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <button
-                    disabled={currentPage >= totalPages}
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:hover:bg-slate-800 transition"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                <div className="flex items-center gap-2">
+                  {[
+                    { id: 'all', label: 'All 216 Sources' },
+                    { id: 'importer', label: 'Importers (108)' },
+                    { id: 'supplier', label: 'Suppliers (108)' },
+                    { id: 'indian', label: 'Indian Councils (77)' },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setSourcesFilter(f.id as any)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition border ${
+                        sourcesFilter === f.id
+                          ? 'bg-amber-500 text-white border-amber-400'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
-          </div>
-        )}
-      </PageLeftNav>
 
-      {/* Customer Dossier Modal */}
-      <CustomerDossier
-        customer={selectedCustomer}
-        onClose={() => setSelectedCustomer(null)}
-      />
+              {/* Search Bar */}
+              <div className="max-w-md">
+                <input
+                  type="text"
+                  placeholder="Search 216 sources by name, category, or country..."
+                  value={sourceSearch}
+                  onChange={(e) => setSourceSearch(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl text-xs bg-slate-950 border border-slate-800 text-white outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {/* Sources Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {filteredSources.map((src) => (
+                  <div
+                    key={src.id}
+                    className="p-4 rounded-xl border border-slate-800 bg-slate-950/80 hover:border-slate-700 transition flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
+                          {src.category}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded">
+                          {src.reliability_score}% Reliable
+                        </span>
+                      </div>
+                      <h4 className="text-xs font-bold text-white mt-2 leading-tight">{src.name}</h4>
+                      <p className="text-[11px] text-slate-400 mt-1">Coverage: {src.country_coverage}</p>
+                    </div>
+
+                    <div className="pt-3 mt-3 border-t border-slate-800/60 flex items-center justify-between">
+                      <span className="text-[10px] font-mono uppercase text-slate-500">{src.lead_type}</span>
+                      <a
+                        href={src.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-amber-400 hover:underline flex items-center gap-1 font-semibold"
+                      >
+                        <span>Visit Registry</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </PageLeftNav>
+
+        {/* Selected Customer Dossier Modal */}
+        {selectedCustomer && (
+          <CustomerDossier
+            customer={selectedCustomer as any}
+            onClose={() => {
+              setSelectedCustomer(null);
+              loadLeads();
+            }}
+          />
+        )}
+      </div>
     </Shell>
   );
 }

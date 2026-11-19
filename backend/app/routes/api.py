@@ -165,6 +165,12 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "source_reliability": int(doc.get("source_reliability") or 96),
         "duplicate_probability": round(float(doc.get("duplicate_probability") if doc.get("duplicate_probability") is not None else 7.5), 1),
         "duplicate_status": doc.get("duplicate_status") or ("duplicate" if float(doc.get("duplicate_probability") or 0) >= 75.0 else ("partial_match" if float(doc.get("duplicate_probability") or 0) >= 30.0 else "unique")),
+        "custom_label": doc.get("custom_label") or "",
+        "extraction_notes": doc.get("extraction_notes") or "",
+        "is_deleted": bool(doc.get("is_deleted", False)),
+        "deleted_at": str(doc.get("deleted_at") or ""),
+        "merge_count": int(doc.get("merge_count") or 1),
+        "merged_history": doc.get("merged_history") or [],
         "created_at": str(doc.get("created_at") or ""),
         "updated_at": str(doc.get("updated_at") or ""),
     }
@@ -185,7 +191,8 @@ def find_mongo_lead(mongo_db, lead_id):
 @api_bp.route("/leads", methods=["GET"])
 def get_leads():
     mongo_db = get_db()
-    filter_q = {}
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    filter_q = {} if include_deleted else {"is_deleted": {"$ne": True}}
 
     lead_type = request.args.get("lead_type")
     if lead_type:
@@ -243,7 +250,8 @@ def get_leads():
 def get_importers():
     """Specific dedicated endpoint for Global Importers with strict route filtering from MongoDB."""
     mongo_db = get_db()
-    filter_q = {"lead_type": "importer"}
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    filter_q = {"lead_type": "importer"} if include_deleted else {"lead_type": "importer", "is_deleted": {"$ne": True}}
 
     country = request.args.get("country")
     if country:
@@ -327,7 +335,8 @@ def get_importers():
 def get_suppliers():
     """Specific dedicated endpoint for Global Suppliers & Mills with strict route filtering from MongoDB."""
     mongo_db = get_db()
-    filter_q = {"lead_type": {"$ne": "importer"}}
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    filter_q = {"lead_type": {"$ne": "importer"}} if include_deleted else {"lead_type": {"$ne": "importer"}, "is_deleted": {"$ne": True}}
 
     district = request.args.get("district")
     if district:
@@ -487,26 +496,77 @@ def get_lead(lead_id):
         except Exception:
             pass
         return jsonify({"error": "Lead not found"}), 404
+
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    if lead.get("is_deleted") and not include_deleted:
+        return jsonify({"error": "Lead not found"}), 404
+
     return jsonify({"lead": serialize_mongo_lead(lead)})
+
+
+@api_bp.route("/leads/<lead_id>", methods=["PUT", "PATCH"])
+def update_lead(lead_id):
+    """Allows fully editable lead attributes across any system field."""
+    mongo_db = get_db()
+    lead = find_mongo_lead(mongo_db, lead_id)
+    if not lead:
+        return jsonify({"error": "Lead not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    up = {"updated_at": now_iso()}
+    allowed = [
+        "company_name", "country", "city_or_hub", "contact_person",
+        "phones", "emails", "website", "address", "matched_varieties",
+        "hs_codes_applicable", "inquiry_or_profile", "priority_score",
+        "lead_type", "gstin", "pan", "fssai_or_sfda_status",
+        "state", "district", "category_or_role", "deal_status",
+        "custom_label", "extraction_notes", "notes"
+    ]
+    for key in allowed:
+        if key in data:
+            if key == "priority_score":
+                try:
+                    up[key] = int(data[key])
+                except (ValueError, TypeError):
+                    pass
+            else:
+                up[key] = data[key]
+
+    mongo_db.leads.update_one({"_id": lead["_id"]}, {"$set": up})
+    updated = find_mongo_lead(mongo_db, lead_id)
+    return jsonify({
+        "lead": serialize_mongo_lead(updated),
+        "message": f"Lead {lead.get('company_name', lead_id)} updated successfully"
+    })
 
 
 @api_bp.route("/leads/<lead_id>", methods=["DELETE"])
 def delete_lead(lead_id):
+    """Soft deletes lead by default, or permanently if permanent=true is specified."""
     mongo_db = get_db()
     lead = find_mongo_lead(mongo_db, lead_id)
     if not lead:
-        try:
-            lead_sq = db.session.get(Lead, int(lead_id))
-            if lead_sq:
-                db.session.delete(lead_sq)
-                db.session.commit()
-                return jsonify({"message": f"Lead {lead_id} deleted successfully"})
-        except Exception:
-            pass
         return jsonify({"error": "Lead not found"}), 404
 
-    mongo_db.leads.delete_one({"_id": lead["_id"]})
+    permanent = request.args.get("permanent", "").lower() == "true"
+    if permanent:
+        mongo_db.leads.delete_one({"_id": lead["_id"]})
+        try:
+            lead_num_id = lead.get("id")
+            if lead_num_id:
+                lead_sq = db.session.get(Lead, int(lead_num_id))
+                if lead_sq:
+                    db.session.delete(lead_sq)
+                    db.session.commit()
+        except Exception:
+            pass
+        return jsonify({"message": f"Lead {lead_id} permanently deleted"})
 
+    # Default: Professional Soft Delete
+    mongo_db.leads.update_one(
+        {"_id": lead["_id"]},
+        {"$set": {"is_deleted": True, "deleted_at": now_iso()}}
+    )
     try:
         lead_num_id = lead.get("id")
         if lead_num_id:
@@ -516,8 +576,42 @@ def delete_lead(lead_id):
                 db.session.commit()
     except Exception:
         pass
+    return jsonify({
+        "message": f"Lead {lead.get('company_name', lead_id)} moved to Trash (soft-deleted)",
+        "lead_id": lead_id,
+        "is_deleted": True,
+    })
 
-    return jsonify({"message": f"Lead {lead_id} deleted successfully"})
+
+@api_bp.route("/leads/<lead_id>/restore", methods=["POST"])
+def restore_lead(lead_id):
+    """Restores a soft-deleted lead back to active status."""
+    mongo_db = get_db()
+    lead = find_mongo_lead(mongo_db, lead_id)
+    if not lead:
+        return jsonify({"error": "Lead not found"}), 404
+
+    mongo_db.leads.update_one(
+        {"_id": lead["_id"]},
+        {"$set": {"is_deleted": False}, "$unset": {"deleted_at": ""}}
+    )
+    restored = find_mongo_lead(mongo_db, lead_id)
+    return jsonify({
+        "lead": serialize_mongo_lead(restored),
+        "message": f"Lead {lead.get('company_name', lead_id)} restored successfully"
+    })
+
+
+@api_bp.route("/leads/trash", methods=["GET"])
+def get_trash_leads():
+    """Returns soft-deleted leads with pagination."""
+    mongo_db = get_db()
+    cursor = mongo_db.leads.find({"is_deleted": True}).sort("deleted_at", -1)
+    trash_leads = [serialize_mongo_lead(d) for d in cursor]
+    return jsonify({
+        "total": len(trash_leads),
+        "leads": trash_leads
+    })
 
 
 @api_bp.route("/leads/<lead_id>/convert-to-deal", methods=["POST"])
@@ -664,6 +758,22 @@ def export_leads_csv():
     )
 
 
+@api_bp.route("/crawler/history", methods=["GET"])
+def get_crawler_history():
+    """Returns extraction history records with custom audit labels."""
+    mongo_db = get_db()
+    cursor = mongo_db.extraction_history.find({}).sort("created_at", -1).limit(50)
+    history = []
+    for h in cursor:
+        d = dict(h)
+        d["_id"] = str(d["_id"])
+        history.append(d)
+    return jsonify({
+        "total": len(history),
+        "history": history,
+    })
+
+
 @api_bp.route("/crawler/sources", methods=["GET"])
 def get_crawler_sources_endpoint():
     from app.sources import get_all_sources
@@ -740,6 +850,8 @@ def trigger_crawl_now():
     custom_city = data.get("custom_city") or data.get("city")
     custom_lat = data.get("latitude") or data.get("lat")
     custom_lng = data.get("longitude") or data.get("lng")
+    custom_label = (data.get("custom_label") or "").strip() or "Standard Harvest"
+    extraction_notes = (data.get("extraction_notes") or "").strip()
     app_obj = current_app._get_current_object()
 
     # STRICT TYPE SEPARATION: Never generate suppliers when importer is requested, and vice-versa
@@ -753,10 +865,13 @@ def trigger_crawl_now():
             custom_city=custom_city,
             custom_lat=custom_lat,
             custom_lng=custom_lng,
+            custom_label=custom_label,
+            extraction_notes=extraction_notes,
         )
         return jsonify({
             "job_id": job_id,
             "status": "pending",
+            "custom_label": custom_label,
             "message": f"Global importer crawler dispatched for country '{country or region or 'Global'}' (Strict Depth: {depth} records)",
         }), 202
 
@@ -770,6 +885,8 @@ def trigger_crawl_now():
             custom_city=custom_city,
             custom_lat=custom_lat,
             custom_lng=custom_lng,
+            custom_label=custom_label,
+            extraction_notes=extraction_notes,
         )
         return jsonify({
             "job_id": job_id,

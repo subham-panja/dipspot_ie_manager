@@ -434,23 +434,26 @@ export default function Sidebar() {
 
       {/* Bottom Footer Section: Permanently Pinned Settings & Version (shrink-0 mt-auto) */}
       <div className={`shrink-0 mt-auto p-3.5 border-t space-y-2 ${isLight ? 'border-slate-100 bg-slate-50/70' : 'border-slate-800/90 bg-[#090d16]/95'}`}>
-        {/* Settings & Preferences Trigger */}
-        <button
-          type="button"
-          onClick={() => openSettings('appearance')}
+        {/* Settings & Preferences Link to dedicated Settings Page */}
+        <Link
+          href="/settings"
           className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition cursor-pointer font-medium ${
-            isLight
+            pathname === '/settings'
+              ? isLight
+                ? `bg-slate-200 text-slate-900 font-bold shadow-sm border ${accentClasses.border}`
+                : `bg-slate-800 text-white font-bold border ${accentClasses.border}`
+              : isLight
               ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 shadow-sm'
               : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/60'
           }`}
-          title="Open Global Settings & Configuration"
+          title="Open Global Settings & Configuration Page"
         >
           <div className="flex items-center space-x-2.5">
             <Settings className="w-4 h-4 text-emerald-400" />
             <span className="font-semibold text-xs">Settings & Config</span>
           </div>
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="System Connected" />
-        </button>
+        </Link>
 
         {/* System Version Indicator */}
         <div className="px-2 pt-1 border-t border-slate-800/50 flex items-center justify-between text-[10px] text-slate-500 font-mono">

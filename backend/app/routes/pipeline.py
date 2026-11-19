@@ -49,6 +49,10 @@ def create_pipeline_stage():
 def get_deals():
     db = get_db()
     query = {}
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    if not include_deleted:
+        query["is_deleted"] = {"$ne": True}
+
     stage_id = request.args.get("stage_id")
     if stage_id:
         query["stage_id"] = stage_id
@@ -169,11 +173,72 @@ def update_deal(deal_id):
     return jsonify({"deal": serialize_doc(updated), "message": "Deal updated successfully"})
 
 
+@pipeline_bp.route("/deals/<deal_id>/comments", methods=["GET"])
+def get_deal_comments(deal_id):
+    db = get_db()
+    deal = db.deals.find_one({"deal_id": deal_id})
+    if not deal:
+        return jsonify({"error": "Deal not found"}), 404
+    comments = deal.get("comments") or []
+    return jsonify({"comments": comments, "total": len(comments)})
+
+
+@pipeline_bp.route("/deals/<deal_id>/comments", methods=["POST"])
+def add_deal_comment(deal_id):
+    db = get_db()
+    deal = db.deals.find_one({"deal_id": deal_id})
+    if not deal:
+        return jsonify({"error": "Deal not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "Comment text is required"}), 400
+
+    comment_doc = {
+        "id": f"comm-{uuid.uuid4().hex[:6]}",
+        "author": data.get("author") or "Trade Specialist",
+        "text": text,
+        "tag": data.get("tag") or "Customer Update",
+        "created_at": now_iso(),
+    }
+
+    db.deals.update_one(
+        {"deal_id": deal_id},
+        {"$push": {"comments": comment_doc}, "$set": {"updated_at": now_iso()}}
+    )
+    return jsonify({"comment": comment_doc, "message": "Comment posted successfully"}), 201
+
+
+@pipeline_bp.route("/deals/<deal_id>/comments/<comment_id>", methods=["DELETE"])
+def delete_deal_comment(deal_id, comment_id):
+    db = get_db()
+    deal = db.deals.find_one({"deal_id": deal_id})
+    if not deal:
+        return jsonify({"error": "Deal not found"}), 404
+
+    db.deals.update_one(
+        {"deal_id": deal_id},
+        {"$pull": {"comments": {"id": comment_id}}, "$set": {"updated_at": now_iso()}}
+    )
+    return jsonify({"message": f"Comment {comment_id} deleted successfully"})
+
+
 @pipeline_bp.route("/deals/<deal_id>", methods=["DELETE"])
 def delete_deal(deal_id):
     db = get_db()
-    res = db.deals.delete_one({"deal_id": deal_id})
-    if res.deleted_count == 0:
+    permanent = request.args.get("permanent", "").lower() == "true"
+    if permanent:
+        res = db.deals.delete_one({"deal_id": deal_id})
+        if res.deleted_count == 0:
+            return jsonify({"error": "Deal not found"}), 404
+        return jsonify({"message": f"Deal {deal_id} permanently deleted"})
+
+    res = db.deals.update_one(
+        {"deal_id": deal_id},
+        {"$set": {"is_deleted": True, "deleted_at": now_iso()}}
+    )
+    if res.matched_count == 0:
         return jsonify({"error": "Deal not found"}), 404
-    return jsonify({"message": f"Deal {deal_id} deleted successfully"})
+    return jsonify({"message": f"Deal {deal_id} soft-deleted successfully", "is_deleted": True})
 

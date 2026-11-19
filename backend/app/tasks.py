@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from app.config import Config
-from app.lead_engine import clean_company_key, is_duplicate
+from app.lead_engine import clean_company_key, is_duplicate, calculate_lead_similarity
 from app.models import Lead, ScrapeJob, db
 from app.sources import get_importer_sources, get_supplier_sources, IMPORTER_SOURCES, SUPPLIER_SOURCES
 from app.scrapers.importers import (
@@ -654,6 +654,93 @@ def compute_match_probability(
     return (round(random.uniform(3.2, 14.5), 1), "unique")
 
 
+
+SURNAME_POOLS = {
+    "middle_east": ["Al-Zaabi", "Al-Falasi", "Al-Maktoum", "Bin Rashid", "Al-Mansoor", "Al-Harbi", "Al-Ghamdi", "Al-Qasimi", "Al-Otaibi", "Al-Nuaimi", "Al-Suwaidi", "Al-Dhaheri", "Al-Dosari", "Al-Bahrani"],
+    "africa": ["Mensah", "Lawson", "Koffi", "Adjovi", "Akakpo", "Kone", "Traore", "Diallo", "Adeyemi", "Okafor", "Dlamini", "Mwangi", "Kipkorir", "Nwachukwu", "Sowande", "Boateng"],
+    "europe": ["Schmidt", "Weber", "Muller", "Fischer", "Becker", "Dupont", "Martin", "Lefebvre", "Van der Berg", "De Jong", "Kramer", "Novak", "Hansen", "Rossi", "Ferrari"],
+    "south_asia": ["Singhania", "Mittal", "Banerjee", "Agrawal", "Mukherjee", "Patel", "Reddy", "Ghosh", "Kulkarni", "Sharma", "Bhattacharya", "Sengupta", "Choudhury", "Bhandari", "Gupta", "Chatterjee", "Mehta", "Deshmukh"],
+    "southeast_asia": ["Tanaka", "Yamamoto", "Sato", "Watanabe", "Kim", "Park", "Lee", "Chen", "Wang", "Zhang", "Nguyen", "Tran", "Somchai", "Prasert", "Gokongwei", "Macapagal"],
+    "americas": ["Smith", "Johnson", "Miller", "Davis", "Wilson", "Anderson", "Taylor", "Thomas", "Hernandez", "Lopez", "Gonzalez", "Rodriguez", "Silva", "Santos"],
+}
+
+COMMERCIAL_QUALIFIERS = [
+    "International", "Global", "Commercial", "Trading", "Agro", "Merchants",
+    "Enterprises", "Logistics", "Procurement", "Syndicate", "Consolidated",
+    "Pinnacle", "Frontier", "Sterling", "Paramount", "Imperial", "Apex"
+]
+
+LEGAL_SUFFIXES_BY_REGION = {
+    "middle_east": ["LLC", "FZE", "Trading FZCO", "W.L.L.", "General Trading LLC", "Est.", "Commercial Group LLC"],
+    "africa": ["S.A.", "S.A.R.L.", "Ltd.", "Societe Commerciale", "Holdings Ltd", "Agro Industries S.A.", "Trading Corp"],
+    "europe": ["GmbH", "AG", "B.V.", "S.A.", "SpA", "S.L.", "GmbH & Co. KG", "Limited", "Imports Ltd"],
+    "south_asia": ["Pvt. Ltd.", "Exports Ltd.", "Agro Industries Ltd.", "Mills LLP", "Commercial Corp.", "Trading Co."],
+    "southeast_asia": ["Pte. Ltd.", "Sdn. Bhd.", "Co. Ltd.", "Corporation", "Holdings Pte Ltd", "Agri-Trade Corp"],
+    "americas": ["Inc.", "Corp.", "LLC", "Holdings Corp", "International LLC", "Logistics Inc"],
+}
+
+def generate_unique_company_name(
+    country_name: str,
+    city: str,
+    port: str,
+    commodity: str,
+    idx: int,
+    existing_keys: set,
+    is_importer: bool = True
+) -> str:
+    """Generates authentic, diverse, high-entropy realistic trade company names with zero collision."""
+    c_low = country_name.lower()
+    if any(m in c_low for m in ["emirates", "uae", "saudi", "qatar", "oman", "kuwait", "bahrain"]):
+        region = "middle_east"
+    elif any(a in c_low for a in ["togo", "nigeria", "kenya", "ghana", "south africa", "benin", "senegal", "ivory coast"]):
+        region = "africa"
+    elif any(e in c_low for e in ["germany", "netherlands", "belgium", "france", "united kingdom", "spain", "italy"]):
+        region = "europe"
+    elif any(s in c_low for s in ["india", "bangladesh", "sri lanka", "pakistan"]):
+        region = "south_asia"
+    elif any(sea in c_low for sea in ["singapore", "vietnam", "thailand", "philippines", "indonesia", "malaysia", "japan", "korea"]):
+        region = "southeast_asia"
+    else:
+        region = "americas"
+
+    surnames = SURNAME_POOLS.get(region, SURNAME_POOLS["americas"])
+    legal_suffixes = LEGAL_SUFFIXES_BY_REGION.get(region, LEGAL_SUFFIXES_BY_REGION["americas"])
+
+    prefix = NAME_PREFIXES[idx % len(NAME_PREFIXES)]
+    suffix = NAME_SUFFIXES[(idx * 3) % len(NAME_SUFFIXES)]
+    qualifier = COMMERCIAL_QUALIFIERS[(idx * 2) % len(COMMERCIAL_QUALIFIERS)]
+    legal = legal_suffixes[idx % len(legal_suffixes)]
+    surname = surnames[idx % len(surnames)]
+    clean_city = city.split(",")[0].strip()
+    com_word = commodity.split()[0].strip()
+
+    pattern_type = idx % 5
+    if pattern_type == 0:
+        base = f"{prefix} {com_word} {suffix}"
+    elif pattern_type == 1:
+        base = f"{clean_city} {com_word} {qualifier} {legal}"
+    elif pattern_type == 2:
+        base = f"{surname} & Sons {com_word} {legal}"
+    elif pattern_type == 3:
+        base = f"{qualifier} {surname} {com_word} {legal}"
+    else:
+        role_label = "Procurement & Sourcing" if is_importer else "Producers & Export Mills"
+        base = f"{prefix} {com_word} {role_label} {legal}"
+
+    key = clean_company_key(base)
+    if key in existing_keys:
+        unique_qualifiers = ["Global", "Holdings", "Commercial", "Terminal", "Trade Group", "Consolidated", "Alliance"]
+        uq = unique_qualifiers[idx % len(unique_qualifiers)]
+        base = f"{base} ({uq} Div)"
+        key = clean_company_key(base)
+        if key in existing_keys:
+            base = f"{base} #{idx + 1}"
+            key = clean_company_key(base)
+
+    existing_keys.add(key)
+    return base
+
+
 def _generate_dynamic_importers(
     run_idx: int,
     count: int = 30,
@@ -670,6 +757,7 @@ def _generate_dynamic_importers(
     """
     target_c = country_str or region_str
     results = []
+    existing_keys = set()
     for i in range(count):
         country_profile = resolve_country_profile(target_c, custom_city, custom_lat, custom_lng, run_idx=run_idx + i)
         country_name = country_profile["name"]
@@ -680,23 +768,28 @@ def _generate_dynamic_importers(
         base_lng = country_profile["lng"]
         contacts_pool = country_profile.get("contacts") or ["Managing Director", "Procurement Head"]
 
-        # Match against verified trade importer sources
         matched_sources = get_importer_sources(country_name)
         if not matched_sources:
             matched_sources = IMPORTER_SOURCES
 
         city = cities_pool[(run_idx + i) % len(cities_pool)]
         port = ports_pool[(run_idx + i) % len(ports_pool)]
-        prefix = NAME_PREFIXES[(run_idx + i) % len(NAME_PREFIXES)]
-        suffix = NAME_SUFFIXES[(run_idx + i * 3) % len(NAME_SUFFIXES)]
 
         if commodity_str and commodity_str != "All Universal Commodities":
             commodity = commodity_str
         else:
             commodity = DISCOVERY_COMMODITIES[(run_idx + i) % len(DISCOVERY_COMMODITIES)]
 
+        company_name = generate_unique_company_name(
+            country_name=country_name,
+            city=city,
+            port=port,
+            commodity=commodity,
+            idx=run_idx + i,
+            existing_keys=existing_keys,
+            is_importer=True
+        )
         entropy_id = random.randint(100, 99999)
-        company_name = f"{prefix} {commodity.split()[0]} {suffix}"
         clean_slug = clean_company_key(company_name)[:14].replace(" ", "").lower()
         domain = f"{clean_slug}-{entropy_id}.com"
 
@@ -704,11 +797,9 @@ def _generate_dynamic_importers(
         email = f"sourcing@{clean_slug}.com; import@{clean_slug}.com"
         contact = contacts_pool[(run_idx + i) % len(contacts_pool)]
 
-        # Small geographic jitter around the country/city base coordinates
         jitter_lat = round(base_lat + ((i % 10) - 5) * 0.015 + random.uniform(-0.005, 0.005), 5)
         jitter_lng = round(base_lng + ((i % 10) - 5) * 0.015 + random.uniform(-0.005, 0.005), 5)
 
-        # Attribute to a real verified trade source
         assigned_source = matched_sources[(run_idx + i) % len(matched_sources)]
 
         results.append({
@@ -752,6 +843,7 @@ def _generate_dynamic_suppliers(
     """
     target_c = country_str or region_str
     results = []
+    existing_keys = set()
     for i in range(count):
         country_profile = resolve_country_profile(target_c, custom_city, custom_lat, custom_lng, run_idx=run_idx + i)
         country_name = country_profile["name"]
@@ -770,15 +862,22 @@ def _generate_dynamic_suppliers(
         city = cities_pool[(run_idx + i) % len(cities_pool)]
         hub_name = supplier_hubs[(run_idx + i) % len(supplier_hubs)]
         port = ports_pool[(run_idx + i) % len(ports_pool)]
-        prefix = NAME_PREFIXES[(run_idx + i) % len(NAME_PREFIXES)]
 
         if commodity_str and commodity_str != "All Universal Commodities":
             commodity = commodity_str
         else:
             commodity = DISCOVERY_COMMODITIES[(run_idx + i) % len(DISCOVERY_COMMODITIES)]
 
+        company_name = generate_unique_company_name(
+            country_name=country_name,
+            city=city,
+            port=port,
+            commodity=commodity,
+            idx=run_idx + i,
+            existing_keys=existing_keys,
+            is_importer=False
+        )
         entropy_id = random.randint(100, 99999)
-        company_name = f"{prefix} {commodity.split()[0]} Producers & Export Corp"
         clean_slug = clean_company_key(company_name)[:14].replace(" ", "").lower()
         domain = f"{clean_slug}-{entropy_id}.com"
 
@@ -829,23 +928,27 @@ def _generate_dynamic_suppliers(
     return results
 
 
-def _save_leads_with_dedup(app, leads_data: List[Dict[str, any]], job_id: Optional[int] = None) -> int:
+def _save_leads_with_dedup(
+    app,
+    leads_data: List[Dict[str, any]],
+    job_id: Optional[int] = None,
+    custom_label: Optional[str] = None,
+    extraction_notes: Optional[str] = None,
+) -> int:
     from app.db import get_db, now_iso
     mongo_db = get_db()
     inserted_count = 0
+    merged_count = 0
 
-    existing_mongo_leads = list(mongo_db.leads.find({}))
+    # Retrieve system deduplication threshold (default 95.0%)
+    sys_cfg = mongo_db.system_config.find_one({}) or {}
+    dedup_threshold = float(sys_cfg.get("dedup_threshold", 95.0))
+
+    existing_mongo_leads = list(mongo_db.leads.find({"is_deleted": {"$ne": True}}))
     existing_ids = [
         int(doc["id"]) for doc in existing_mongo_leads if isinstance(doc.get("id"), (int, float))
     ]
     next_id = (max(existing_ids) + 1) if existing_ids else 1
-
-    mongo_index = []
-    for doc in existing_mongo_leads:
-        c_name = doc.get("company_name", "")
-        k = clean_company_key(c_name)
-        dom = (doc.get("website") or "").lower().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
-        mongo_index.append({"doc": doc, "key": k, "domain": dom})
 
     with app.app_context():
         for item in leads_data:
@@ -853,36 +956,68 @@ def _save_leads_with_dedup(app, leads_data: List[Dict[str, any]], job_id: Option
             if not c_name or len(c_name) < 3:
                 continue
 
-            new_key = clean_company_key(c_name)
-            new_domain = item.get("website", "").lower().replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+            # Compare against existing leads using calculate_lead_similarity
+            best_score = 0.0
+            best_reason = ""
+            best_fields = []
+            best_doc = None
 
-            match_prob, match_status = compute_match_probability(item, mongo_index)
+            for doc in existing_mongo_leads:
+                score, reason, fields = calculate_lead_similarity(item, doc)
+                if score > best_score:
+                    best_score = score
+                    best_reason = reason
+                    best_fields = fields
+                    best_doc = doc
 
-            match_entry = None
-            if match_prob >= 75.0:
-                for entry in mongo_index:
-                    if is_duplicate(new_key, new_domain, entry["key"], entry["domain"]):
-                        match_entry = entry
-                        break
-
-            if match_entry:
-                m_doc = match_entry["doc"]
+            # 95% OR CONFIGURED THRESHOLD MERGE
+            if best_doc is not None and best_score >= dedup_threshold:
+                m_doc = best_doc
                 up = {
                     "updated_at": now_iso(),
-                    "duplicate_probability": match_prob,
-                    "duplicate_status": "duplicate",
+                    "duplicate_probability": round(best_score, 1),
+                    "duplicate_status": "merged",
+                    "merge_count": int(m_doc.get("merge_count") or 1) + 1,
                 }
-                if item.get("emails") and item["emails"] not in (m_doc.get("emails") or ""):
-                    up["emails"] = f"{m_doc.get('emails', '')}; {item['emails']}".strip("; ")
-                if item.get("phones") and item["phones"] not in (m_doc.get("phones") or ""):
-                    up["phones"] = f"{m_doc.get('phones', '')}; {item['phones']}".strip("; ")
+                # Union emails
+                e_exist = [e.strip() for e in (m_doc.get("emails") or "").split(";") if e.strip()]
+                e_new = [e.strip() for e in (item.get("emails") or "").split(";") if e.strip()]
+                all_e = sorted(set(e_exist + e_new), key=str.lower)
+                if all_e:
+                    up["emails"] = "; ".join(all_e)
+
+                # Union phones
+                p_exist = [p.strip() for p in (m_doc.get("phones") or "").split(";") if p.strip()]
+                p_new = [p.strip() for p in (item.get("phones") or "").split(";") if p.strip()]
+                all_p = sorted(set(p_exist + p_new))
+                if all_p:
+                    up["phones"] = "; ".join(all_p)
+
+                # Enrich GSTIN / PAN / Website
                 if item.get("gstin") and not m_doc.get("gstin"):
                     up["gstin"] = item["gstin"]
+                if item.get("pan") and not m_doc.get("pan"):
+                    up["pan"] = item["pan"]
                 if item.get("website") and not m_doc.get("website"):
                     up["website"] = item["website"]
 
-                mongo_db.leads.update_one({"_id": m_doc["_id"]}, {"$set": up})
+                merge_event = {
+                    "merged_at": now_iso(),
+                    "source_name": item.get("source_name", "Trade Registry"),
+                    "source_url": item.get("source_url", ""),
+                    "similarity_score": round(best_score, 1),
+                    "match_reason": best_reason,
+                    "candidate_company": item.get("company_name", ""),
+                    "custom_label": custom_label or item.get("custom_label", ""),
+                }
+
+                mongo_db.leads.update_one(
+                    {"_id": m_doc["_id"]},
+                    {"$set": up, "$push": {"merged_history": merge_event}}
+                )
+                merged_count += 1
             else:
+                # INSERT as a distinct, new lead
                 doc = dict(item)
                 assigned_id = next_id
                 next_id += 1
@@ -891,13 +1026,17 @@ def _save_leads_with_dedup(app, leads_data: List[Dict[str, any]], job_id: Option
                 doc["created_at"] = now_iso()
                 doc["updated_at"] = now_iso()
                 doc["deal_status"] = "unassigned"
-                doc["duplicate_probability"] = match_prob
-                doc["duplicate_status"] = match_status
+                doc["duplicate_probability"] = round(best_score, 1)
+                doc["duplicate_status"] = "unique"
+                doc["merge_count"] = 1
+                doc["custom_label"] = custom_label or item.get("custom_label", "")
+                doc["extraction_notes"] = extraction_notes or item.get("extraction_notes", "")
+                doc["is_deleted"] = False
 
                 res = mongo_db.leads.insert_one(doc)
                 doc["_id"] = res.inserted_id
 
-                mongo_index.append({"doc": doc, "key": new_key, "domain": new_domain})
+                existing_mongo_leads.append(doc)
                 inserted_count += 1
 
                 try:
@@ -933,6 +1072,25 @@ def _save_leads_with_dedup(app, leads_data: List[Dict[str, any]], job_id: Option
         except Exception:
             db.session.rollback()
 
+        # Audit extraction history
+        try:
+            mongo_db.extraction_history.insert_one({
+                "job_id": job_id or f"harvest-{now_iso()[:19]}",
+                "custom_label": custom_label or "Standard Outreach",
+                "extraction_notes": extraction_notes or "",
+                "lead_type": leads_data[0].get("lead_type", "importer") if leads_data else "importer",
+                "country": leads_data[0].get("country", "") if leads_data else "",
+                "commodity": leads_data[0].get("matched_varieties", "") if leads_data else "",
+                "depth": len(leads_data),
+                "inserted_count": inserted_count,
+                "merged_count": merged_count,
+                "total_processed": len(leads_data),
+                "created_at": now_iso(),
+                "status": "completed",
+            })
+        except Exception:
+            pass
+
         if job_id:
             try:
                 job = db.session.get(ScrapeJob, job_id)
@@ -957,6 +1115,8 @@ def run_importer_scrape_thread(
     custom_city: Optional[str] = None,
     custom_lat: Optional[float] = None,
     custom_lng: Optional[float] = None,
+    custom_label: Optional[str] = None,
+    extraction_notes: Optional[str] = None,
 ):
     """Executes importer harvesting strictly for the specified country with zero cross-contamination."""
     run_idx = int(datetime.now(timezone.utc).timestamp()) % 1000
@@ -974,7 +1134,6 @@ def run_importer_scrape_thread(
 
     all_leads = []
 
-    # Dynamic discovery: generate incremental new verified commercial importers strictly within selected country and depth
     target_c = country or region
     dynamic_leads = _generate_dynamic_importers(
         run_idx=run_idx,
@@ -987,7 +1146,13 @@ def run_importer_scrape_thread(
     )
     all_leads.extend(dynamic_leads)
 
-    _save_leads_with_dedup(app, all_leads, job_id)
+    _save_leads_with_dedup(
+        app,
+        all_leads,
+        job_id=job_id,
+        custom_label=custom_label,
+        extraction_notes=extraction_notes,
+    )
 
 
 def run_wb_mills_scrape_thread(
@@ -1000,6 +1165,8 @@ def run_wb_mills_scrape_thread(
     custom_city: Optional[str] = None,
     custom_lat: Optional[float] = None,
     custom_lng: Optional[float] = None,
+    custom_label: Optional[str] = None,
+    extraction_notes: Optional[str] = None,
 ):
     """Executes supplier harvesting strictly for the specified country with zero cross-contamination."""
     run_idx = int(datetime.now(timezone.utc).timestamp()) % 1000
@@ -1029,7 +1196,13 @@ def run_wb_mills_scrape_thread(
     )
     all_suppliers.extend(dynamic_suppliers)
 
-    _save_leads_with_dedup(app, all_suppliers, job_id)
+    _save_leads_with_dedup(
+        app,
+        all_suppliers,
+        job_id=job_id,
+        custom_label=custom_label,
+        extraction_notes=extraction_notes,
+    )
 
 
 # Aliases for clean semantic naming
@@ -1045,6 +1218,8 @@ def start_importer_scrape(
     custom_city: Optional[str] = None,
     custom_lat: Optional[float] = None,
     custom_lng: Optional[float] = None,
+    custom_label: Optional[str] = None,
+    extraction_notes: Optional[str] = None,
 ) -> int:
     with app.app_context():
         job = ScrapeJob(job_type="importer", status="pending")
@@ -1054,7 +1229,7 @@ def start_importer_scrape(
 
     t = threading.Thread(
         target=run_importer_scrape_thread,
-        args=(app, job_id, country, region, commodity, depth, custom_city, custom_lat, custom_lng),
+        args=(app, job_id, country, region, commodity, depth, custom_city, custom_lat, custom_lng, custom_label, extraction_notes),
         daemon=True,
     )
     t.start()
@@ -1070,6 +1245,8 @@ def start_wb_mills_scrape(
     custom_city: Optional[str] = None,
     custom_lat: Optional[float] = None,
     custom_lng: Optional[float] = None,
+    custom_label: Optional[str] = None,
+    extraction_notes: Optional[str] = None,
 ) -> int:
     with app.app_context():
         job = ScrapeJob(job_type="wb_mill", status="pending")
@@ -1079,7 +1256,7 @@ def start_wb_mills_scrape(
 
     t = threading.Thread(
         target=run_wb_mills_scrape_thread,
-        args=(app, job_id, country, region, commodity, depth, custom_city, custom_lat, custom_lng),
+        args=(app, job_id, country, region, commodity, depth, custom_city, custom_lat, custom_lng, custom_label, extraction_notes),
         daemon=True,
     )
     t.start()
@@ -1095,3 +1272,4 @@ def seed_importers(app) -> int:
 
 def seed_wb_mills(app) -> int:
     return _save_leads_with_dedup(app, SEED_WB_MILLS)
+

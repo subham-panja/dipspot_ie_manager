@@ -70,6 +70,62 @@ export default function PipelineKanbanPage() {
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [newNote, setNewNote] = useState('');
 
+  // Interactive Comments State
+  const [dealComments, setDealComments] = useState<Array<{ id: string; author: string; text: string; tag: string; created_at: string }>>([]);
+  const [commentText, setCommentText] = useState('');
+  const [commentAuthor, setCommentAuthor] = useState('Trade Specialist');
+  const [commentTag, setCommentTag] = useState('Customer Update');
+  const [loadingComments, setLoadingComments] = useState(false);
+
+  useEffect(() => {
+    if (selectedDeal?.deal_id) {
+      loadComments(selectedDeal.deal_id);
+    } else {
+      setDealComments([]);
+    }
+  }, [selectedDeal?.deal_id]);
+
+  const loadComments = async (dealId: string) => {
+    try {
+      setLoadingComments(true);
+      const res = await fetchJson<{ comments: any[] }>(`/pipeline/deals/${dealId}/comments`);
+      setDealComments(res.comments || []);
+    } catch (err) {
+      console.error('Failed to load comments', err);
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+
+  const handlePostComment = async (dealId: string) => {
+    if (!commentText.trim()) return;
+    try {
+      const res = await fetchJson<{ comment: any }>(`/pipeline/deals/${dealId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          text: commentText.trim(),
+          author: commentAuthor,
+          tag: commentTag,
+        }),
+      });
+      if (res.comment) {
+        setDealComments((prev) => [...prev, res.comment]);
+        setCommentText('');
+      }
+    } catch (err: any) {
+      alert('Failed to post comment: ' + err.message);
+    }
+  };
+
+  const handleDeleteComment = async (dealId: string, commentId: string) => {
+    try {
+      await fetchJson(`/pipeline/deals/${dealId}/comments/${commentId}`, { method: 'DELETE' });
+      setDealComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (err: any) {
+      alert('Failed to delete comment: ' + err.message);
+    }
+  };
+
   // Customer Dossier view
   const [dossierCustomer, setDossierCustomer] = useState<any | null>(null);
 
@@ -824,43 +880,97 @@ export default function PipelineKanbanPage() {
                 </select>
               </div>
 
-              {/* Notes Timeline */}
-              <div className="space-y-2.5">
-                <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  Customer Activity Notes
-                </h4>
+              {/* Interactive Comments Section */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-purple-400" />
+                    Interactive Comments & Deal History
+                  </h4>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-bold">
+                    {dealComments.length} Comments
+                  </span>
+                </div>
 
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {selectedDeal.notes && selectedDeal.notes.length > 0 ? (
-                    selectedDeal.notes.map((n, i) => (
+                {/* Comments List */}
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {loadingComments ? (
+                    <div className="text-xs text-slate-500 py-4 text-center">Loading comments...</div>
+                  ) : dealComments.length > 0 ? (
+                    dealComments.map((c) => (
                       <div
-                        key={i}
-                        className="bg-slate-950 border border-slate-800/80 p-2.5 rounded-lg text-xs text-slate-300"
+                        key={c.id}
+                        className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl text-xs space-y-1.5 hover:border-slate-700 transition"
                       >
-                        {n}
+                        <div className="flex items-center justify-between text-[10px]">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-purple-400">{c.author || 'Trade Specialist'}</span>
+                            <span className="px-1.5 py-0.2 rounded font-mono bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                              {c.tag || 'Update'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500 font-mono">
+                              {c.created_at ? c.created_at.slice(11, 16) : 'Just now'}
+                            </span>
+                            <button
+                              onClick={() => handleDeleteComment(selectedDeal.deal_id, c.id)}
+                              className="text-slate-600 hover:text-rose-400 text-[10px]"
+                              title="Delete comment"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-slate-200 text-xs font-normal leading-relaxed">{c.text}</p>
                       </div>
                     ))
                   ) : (
-                    <div className="text-xs text-slate-500 italic">No notes logged yet.</div>
+                    <div className="text-xs text-slate-500 italic py-3 text-center border border-dashed border-slate-800/80 rounded-xl">
+                      No comments logged yet. Add negotiation notes, counter-offers, or port milestones below.
+                    </div>
                   )}
                 </div>
 
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Add an update note..."
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddNote(selectedDeal.deal_id)}
-                    className="flex-1 bg-slate-950 border border-slate-800 text-xs text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
-                  />
-                  <button
-                    onClick={() => handleAddNote(selectedDeal.deal_id)}
-                    className="bg-slate-800 hover:bg-slate-700 text-white text-xs px-3 py-2 rounded-lg"
-                  >
-                    Post Note
-                  </button>
+                {/* Comment Composer */}
+                <div className="space-y-2 pt-1 border-t border-slate-800/60">
+                  <div className="flex gap-2">
+                    <select
+                      value={commentTag}
+                      onChange={(e) => setCommentTag(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 text-[11px] text-slate-300 px-2 py-1.5 rounded-lg outline-none"
+                    >
+                      <option value="Customer Update">Customer Update</option>
+                      <option value="Pricing Counter-Offer">Pricing Counter-Offer</option>
+                      <option value="Port Milestone">Port Milestone</option>
+                      <option value="Internal Review">Internal Review</option>
+                      <option value="L/C Verification">L/C Verification</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Your name / role"
+                      value={commentAuthor}
+                      onChange={(e) => setCommentAuthor(e.target.value)}
+                      className="w-32 bg-slate-950 border border-slate-800 text-[11px] text-white px-2 py-1.5 rounded-lg outline-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Add an interactive comment (Press Enter)..."
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handlePostComment(selectedDeal.deal_id)}
+                      className="flex-1 bg-slate-950 border border-slate-800 text-xs text-white px-3 py-2 rounded-xl outline-none focus:border-purple-500"
+                    />
+                    <button
+                      onClick={() => handlePostComment(selectedDeal.deal_id)}
+                      className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-3 py-2 rounded-xl transition"
+                    >
+                      Post
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

@@ -181,3 +181,88 @@ def is_duplicate(
     if new_domain and existing_domain and new_domain == existing_domain:
         return True
     return fuzz.token_sort_ratio(new_key, existing_key) >= threshold
+
+
+def calculate_lead_similarity(
+    candidate: Dict[str, any],
+    existing: Dict[str, any],
+) -> Tuple[float, str, List[str]]:
+    """
+    Computes multi-factor ML/NLP similarity score (0.0% to 100.0%) between candidate and existing lead.
+    Returns (score, match_reason, matching_fields).
+    """
+    matching_fields: List[str] = []
+
+    # 1. Tax ID Match (GSTIN / PAN / IEC)
+    cand_gstin = (candidate.get("gstin") or "").strip().upper()
+    exist_gstin = (existing.get("gstin") or "").strip().upper()
+    if cand_gstin and exist_gstin and cand_gstin == exist_gstin:
+        matching_fields.append("gstin")
+        return (99.8, "Exact Tax ID (GSTIN) match", matching_fields)
+
+    cand_pan = (candidate.get("pan") or "").strip().upper()
+    exist_pan = (existing.get("pan") or "").strip().upper()
+    if cand_pan and exist_pan and cand_pan == exist_pan:
+        matching_fields.append("pan")
+        return (99.5, "Exact Tax ID (PAN) match", matching_fields)
+
+    # 2. Web Domain Match
+    def clean_dom(u: str) -> str:
+        return (u or "").lower().replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].strip()
+
+    c_dom = clean_dom(candidate.get("website") or "")
+    e_dom = clean_dom(existing.get("website") or "")
+    if c_dom and e_dom and c_dom == e_dom:
+        matching_fields.append("website")
+        return (98.5, f"Exact Web Domain match ({c_dom})", matching_fields)
+
+    # 3. Phone Match (normalized digits)
+    c_phones = re.sub(r"\D", "", candidate.get("phones") or "")
+    e_phones = re.sub(r"\D", "", existing.get("phones") or "")
+    if len(c_phones) >= 8 and len(e_phones) >= 8 and c_phones[-10:] == e_phones[-10:]:
+        matching_fields.append("phones")
+        c_k = clean_company_key(candidate.get("company_name", ""))
+        e_k = clean_company_key(existing.get("company_name", ""))
+        sort_ratio = fuzz.token_sort_ratio(c_k, e_k) if (c_k and e_k) else 0
+        if sort_ratio >= 45:
+            return (96.5, "Exact Phone match with consistent corporate identity", matching_fields)
+        return (72.0, "Shared contact phone across distinct commercial entities", matching_fields)
+
+    # 4. Multi-Factor NLP Company Name Similarity (RapidFuzz token_sort_ratio & token_set_ratio)
+    c_name = candidate.get("company_name", "").strip()
+    e_name = existing.get("company_name", "").strip()
+    c_key = clean_company_key(c_name)
+    e_key = clean_company_key(e_name)
+
+    if c_key and e_key and c_key == e_key:
+        matching_fields.append("company_name")
+        return (99.0, "Exact Normalized Company Name match", matching_fields)
+
+    if c_key and e_key:
+        sort_ratio = fuzz.token_sort_ratio(c_key, e_key)
+        set_ratio = fuzz.token_set_ratio(c_key, e_key)
+        partial = fuzz.partial_ratio(c_key, e_key)
+
+        # Weighted composite score
+        name_score = round(0.55 * sort_ratio + 0.35 * set_ratio + 0.10 * partial, 1)
+
+        c_country = (candidate.get("country") or "").strip().lower()
+        e_country = (existing.get("country") or "").strip().lower()
+
+        # If in the same country, high name similarity confirms same entity
+        if c_country and e_country and c_country == e_country:
+            matching_fields.append("country")
+            if name_score >= 90.0:
+                name_score = min(round(name_score * 1.05, 1), 100.0)
+            if name_score >= 95.0:
+                matching_fields.append("company_name")
+                return (name_score, f"Company Name NLP match ({name_score}%) in same country", matching_fields)
+
+        if name_score >= 95.0:
+            matching_fields.append("company_name")
+            return (name_score, f"High-confidence Company Name NLP match ({name_score}%)", matching_fields)
+
+        return (name_score, "Sub-threshold similarity", matching_fields)
+
+    return (0.0, "No similarity detected", [])
+

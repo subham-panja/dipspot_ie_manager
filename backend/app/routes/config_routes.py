@@ -15,6 +15,26 @@ def serialize_doc(doc):
     return d
 
 
+DEFAULT_COMPANY_PROFILE = {
+    "company_name": "TradePulse EXIM Global Corp",
+    "iec_code": "0519042918",
+    "gstin": "19AABCT1234F1Z5",
+    "default_currency": "USD",
+    "default_unit": "MT",
+    "primary_export_port": "Syama Prasad Mookerjee Port Kolkata (INCCU)",
+    "support_email": "export@tradepulse.exim",
+    "phone": "+91 33 2289 4400",
+}
+
+DEFAULT_DEDUP_CONFIG = {
+    "dedup_threshold": 95.0,
+    "auto_merge_duplicates": True,
+    "conflict_resolution": "intelligent_union",
+    "phone_crosscheck": True,
+    "tax_crosscheck": True,
+    "ml_model": "RapidFuzz Multi-Factor NLP Token Ensemble",
+}
+
 DEFAULT_SMTP_CONFIG = {
     "host": "smtp.gmail.com",
     "port": 587,
@@ -234,3 +254,59 @@ def update_crawler_config():
     current["updated_at"] = now_iso()
     db.system_config.update_one({"_id": "singleton_config"}, {"$set": {"crawler": current}}, upsert=True)
     return jsonify({"crawler": current, "message": "Crawler parameters and sources updated successfully"})
+
+
+@config_bp.route("/company", methods=["GET"])
+def get_company_config():
+    db = get_db()
+    conf = db.system_config.find_one({"_id": "singleton_config"}) or {}
+    company = conf.get("company_profile", DEFAULT_COMPANY_PROFILE)
+    return jsonify({"company": company})
+
+
+@config_bp.route("/company", methods=["PATCH"])
+def update_company_config():
+    db = get_db()
+    data = request.get_json() or {}
+    conf = db.system_config.find_one({"_id": "singleton_config"}) or {}
+    current = dict(conf.get("company_profile", DEFAULT_COMPANY_PROFILE))
+
+    for k in ["company_name", "iec_code", "gstin", "default_currency", "default_unit", "primary_export_port", "support_email", "phone"]:
+        if k in data:
+            current[k] = data[k]
+
+    current["updated_at"] = now_iso()
+    db.system_config.update_one({"_id": "singleton_config"}, {"$set": {"company_profile": current}}, upsert=True)
+    return jsonify({"company": current, "message": "Company EXIM profile updated successfully"})
+
+
+@config_bp.route("/dedup", methods=["GET"])
+def get_dedup_config():
+    db = get_db()
+    conf = db.system_config.find_one({"_id": "singleton_config"}) or {}
+    dedup = conf.get("dedup", DEFAULT_DEDUP_CONFIG)
+    return jsonify({"dedup": dedup})
+
+
+@config_bp.route("/dedup", methods=["PATCH"])
+def update_dedup_config():
+    db = get_db()
+    data = request.get_json() or {}
+    conf = db.system_config.find_one({"_id": "singleton_config"}) or {}
+    current = dict(conf.get("dedup", DEFAULT_DEDUP_CONFIG))
+
+    if "dedup_threshold" in data:
+        try:
+            current["dedup_threshold"] = float(data["dedup_threshold"])
+            # Also sync top-level dedup_threshold for quick tasks.py lookup
+            db.system_config.update_one({"_id": "singleton_config"}, {"$set": {"dedup_threshold": current["dedup_threshold"]}}, upsert=True)
+        except (ValueError, TypeError):
+            pass
+
+    for k in ["auto_merge_duplicates", "conflict_resolution", "phone_crosscheck", "tax_crosscheck"]:
+        if k in data:
+            current[k] = data[k]
+
+    current["updated_at"] = now_iso()
+    db.system_config.update_one({"_id": "singleton_config"}, {"$set": {"dedup": current}}, upsert=True)
+    return jsonify({"dedup": current, "message": "ML Deduplication parameters updated successfully"})
