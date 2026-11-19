@@ -5,6 +5,15 @@ import phonenumbers
 from email_validator import EmailNotValidError, validate_email
 from rapidfuzz import fuzz
 from app.config import Config
+from app.verifier import (
+    extract_domain,
+    filter_live_emails,
+    is_domain_live,
+    is_email_domain_live,
+    is_synthetic_domain_format,
+    verify_domain_resolves,
+    verify_website_live,
+)
 
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,10}", re.I)
 OBFUSCATED_EMAIL_REGEX = re.compile(
