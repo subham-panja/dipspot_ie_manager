@@ -201,6 +201,26 @@ export default function Sidebar() {
                 &bull; Active Sequences
               </Link>
               <Link
+                href="/campaigns/inbox"
+                className={`block px-3 py-1.5 rounded-lg text-[11px] transition ${
+                  pathname === '/campaigns/inbox'
+                    ? `${accentClasses.text} font-bold bg-slate-800/20`
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                &bull; Omnichannel Inbox
+              </Link>
+              <Link
+                href="/campaigns/cadences"
+                className={`block px-3 py-1.5 rounded-lg text-[11px] transition ${
+                  pathname === '/campaigns/cadences'
+                    ? `${accentClasses.text} font-bold bg-slate-800/20`
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                &bull; Follow-Up Cadences
+              </Link>
+              <Link
                 href="/campaigns/segments"
                 className={`block px-3 py-1.5 rounded-lg text-[11px] transition ${
                   pathname === '/campaigns/segments'

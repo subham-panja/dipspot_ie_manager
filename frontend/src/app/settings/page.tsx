@@ -31,8 +31,14 @@ import {
   CheckSquare,
   Square,
   Search,
-  Power
+  Power,
+  Smartphone,
+  Scale,
+  AlertOctagon,
+  Info,
+  Lock,
 } from 'lucide-react';
+import SmtpStopperBanner, { SmtpStopperStatus } from '@/components/campaigns/SmtpStopperBanner';
 
 interface SourceItem {
   id: string;
@@ -154,7 +160,56 @@ export default function DedicatedSettingsPage() {
     api_token: 'EAABwzLIX4ZAIBA...',
     phone_number_id: '109849201948291',
     webhook_url: 'https://api.tradepulse.exim/webhooks/whatsapp',
+    personal_daily_cap: 50,
+    typing_delay_jitter: '4500ms - 8200ms',
+    auto_stop_opt_out: true,
   });
+
+  // SMTP Stopper State & Actions
+  const [smtpStopper, setSmtpStopper] = useState<SmtpStopperStatus | null>(null);
+
+  const loadSmtpStopper = async () => {
+    try {
+      const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/status');
+      if (res?.status) setSmtpStopper(res.status);
+    } catch (e) {
+      console.error('Failed to load smtp stopper status', e);
+    }
+  };
+
+  const handleHardBreak = async () => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/hard-break', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'Operator manual emergency freeze from Settings' }),
+    });
+    if (res?.status) setSmtpStopper(res.status);
+    showNotification('Gmail Mail Stopper engaged. All active email campaigns frozen.');
+  };
+
+  const handleResume = async () => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/resume', {
+      method: 'POST',
+    });
+    if (res?.status) setSmtpStopper(res.status);
+    showNotification('Mail Stopper disengaged. Campaigns resumed.');
+  };
+
+  const handleResetCounter = async () => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/reset-counter', {
+      method: 'POST',
+    });
+    if (res?.status) setSmtpStopper(res.status);
+    showNotification('24-hour SMTP counter reset to 0.');
+  };
+
+  const handleUpdateLimit = async (newLimit: number) => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ daily_limit: newLimit }),
+    });
+    if (res?.status) setSmtpStopper(res.status);
+    showNotification(`Daily SMTP limit set to ${newLimit} emails/day.`);
+  };
 
   // Trash Leads State
   const [trashLeads, setTrashLeads] = useState<TrashLead[]>([]);
@@ -173,6 +228,7 @@ export default function DedicatedSettingsPage() {
       if (dedupRes?.dedup) setDedup(dedupRes.dedup);
       if (smtpRes?.smtp) setSmtp(smtpRes.smtp);
       if (sourcesRes?.sources) setSources(sourcesRes.sources);
+      loadSmtpStopper();
     } catch (e) {
       console.error('Failed to load settings', e);
     } finally {
@@ -1002,202 +1058,297 @@ export default function DedicatedSettingsPage() {
 
         {/* Tab 3: SMTP Gateway */}
         {activeTab === 'smtp' && (
-          <div
-            className={`p-6 rounded-2xl border space-y-6 ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/80 border-slate-800'
-            }`}
-          >
-            <div>
-              <h2 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                Gmail & Commercial SMTP Delivery Gateway
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Connect your organization SMTP server or Gmail App Password for transactional emails, quotations, and sequences.
-              </p>
-            </div>
+          <div className="space-y-6">
+            {/* Real-time Gmail SMTP Quota & Emergency Hard-Break Stopper Banner */}
+            <SmtpStopperBanner
+              status={smtpStopper}
+              onHardBreak={handleHardBreak}
+              onResume={handleResume}
+              onResetCounter={handleResetCounter}
+              onUpdateLimit={handleUpdateLimit}
+              isLight={isLight}
+              accentClasses={accentClasses}
+            />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div
+              className={`p-6 rounded-2xl border space-y-6 ${
+                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/80 border-slate-800'
+              }`}
+            >
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">SMTP Host Server</label>
-                <input
-                  type="text"
-                  value={smtp.host}
-                  onChange={(e) => setSmtp({ ...smtp, host: e.target.value })}
-                  placeholder="smtp.gmail.com"
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
+                <h2 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  Gmail & Commercial SMTP Delivery Gateway
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Connect your organization SMTP server or Gmail App Password for transactional emails, quotations, and sequences.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Port (587 TLS / 465 SSL)</label>
-                <input
-                  type="number"
-                  value={smtp.port}
-                  onChange={(e) => setSmtp({ ...smtp, port: parseInt(e.target.value) || 587 })}
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
+              {/* Personal Gmail Quota Warning & Architecture Callout */}
+              <div className="p-4 rounded-xl bg-purple-950/30 border border-purple-800/40 text-xs text-purple-200 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-white">
+                  <ShieldCheck className="w-4 h-4 text-purple-400" />
+                  <span>Personal Gmail SMTP Sending Limits & Automated Stopper Protection</span>
+                </div>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  Google enforces a strict limit of <strong>500 recipients per rolling 24-hour window</strong> for personal <code className="text-purple-300">@gmail.com</code> accounts (and throttles external SMTP clients at ~100–150 emails/day). Exceeding this triggers Gmail error <code className="text-rose-400">550 5.4.5 Daily user sending limit exceeded</code> and suspends sending for 24 hours.
+                </p>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  <strong>TradePulse Guarantee:</strong> Our built-in Stopper tracks every email in real-time. If the configured ceiling is met, or if any 550/421 SMTP error is detected, an emergency hard break is instantly engaged to freeze active campaigns and safeguard your Gmail account.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">SMTP Username / Email</label>
-                <input
-                  type="email"
-                  value={smtp.username}
-                  onChange={(e) => setSmtp({ ...smtp, username: e.target.value })}
-                  placeholder="exports@tradepulse.exim"
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">SMTP Host Server</label>
+                  <input
+                    type="text"
+                    value={smtp.host}
+                    onChange={(e) => setSmtp({ ...smtp, host: e.target.value })}
+                    placeholder="smtp.gmail.com"
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Port (587 TLS / 465 SSL)</label>
+                  <input
+                    type="number"
+                    value={smtp.port}
+                    onChange={(e) => setSmtp({ ...smtp, port: parseInt(e.target.value) || 587 })}
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">SMTP Username / Email</label>
+                  <input
+                    type="email"
+                    value={smtp.username}
+                    onChange={(e) => setSmtp({ ...smtp, username: e.target.value })}
+                    placeholder="exports@tradepulse.exim"
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">App Password / Auth Token</label>
+                  <input
+                    type="password"
+                    value={smtp.password}
+                    onChange={(e) => setSmtp({ ...smtp, password: e.target.value })}
+                    placeholder="••••••••••••••••"
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Sender From Name</label>
+                  <input
+                    type="text"
+                    value={smtp.from_name}
+                    onChange={(e) => setSmtp({ ...smtp, from_name: e.target.value })}
+                    placeholder="TradePulse Commercial Exports"
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Reply-To Email Address</label>
+                  <input
+                    type="email"
+                    value={smtp.from_email}
+                    onChange={(e) => setSmtp({ ...smtp, from_email: e.target.value })}
+                    placeholder="exports@tradepulse.exim"
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">App Password / Auth Token</label>
-                <input
-                  type="password"
-                  value={smtp.password}
-                  onChange={(e) => setSmtp({ ...smtp, password: e.target.value })}
-                  placeholder="••••••••••••••••"
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
+              {testSmtpResult && (
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-mono">
+                  {testSmtpResult}
+                </div>
+              )}
+
+              <div className="pt-4 border-t border-slate-800/40 flex items-center justify-between">
+                <button
+                  onClick={handleTestSmtp}
+                  disabled={testingSmtp}
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 transition flex items-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  {testingSmtp ? 'Testing Connection...' : 'Test SMTP Connection'}
+                </button>
+
+                <button
+                  onClick={saveSmtp}
+                  disabled={saving}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${accentClasses.btn}`}
+                >
+                  <Save className="w-4 h-4" />
+                  {saving ? 'Saving...' : 'Save SMTP Settings'}
+                </button>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Sender From Name</label>
-                <input
-                  type="text"
-                  value={smtp.from_name}
-                  onChange={(e) => setSmtp({ ...smtp, from_name: e.target.value })}
-                  placeholder="TradePulse Commercial Exports"
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Reply-To Email Address</label>
-                <input
-                  type="email"
-                  value={smtp.from_email}
-                  onChange={(e) => setSmtp({ ...smtp, from_email: e.target.value })}
-                  placeholder="exports@tradepulse.exim"
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
-              </div>
-            </div>
-
-            {testSmtpResult && (
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-mono">
-                {testSmtpResult}
-              </div>
-            )}
-
-            <div className="pt-4 border-t border-slate-800/40 flex items-center justify-between">
-              <button
-                onClick={handleTestSmtp}
-                disabled={testingSmtp}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 transition flex items-center gap-2"
-              >
-                <Send className="w-4 h-4" />
-                {testingSmtp ? 'Testing Connection...' : 'Test SMTP Connection'}
-              </button>
-
-              <button
-                onClick={saveSmtp}
-                disabled={saving}
-                className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${accentClasses.btn}`}
-              >
-                <Save className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Save SMTP Settings'}
-              </button>
             </div>
           </div>
         )}
 
         {/* Tab 4: WhatsApp & SMS */}
         {activeTab === 'whatsapp' && (
-          <div
-            className={`p-6 rounded-2xl border space-y-6 ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/80 border-slate-800'
-            }`}
-          >
-            <div>
-              <h2 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                WhatsApp Cloud API & SMS Carrier Gateway
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Send interactive trade quotes, bill of lading milestones, and cargo alerts directly to overseas buyers via WhatsApp.
-              </p>
-            </div>
-
-            <div className="space-y-4 max-w-xl">
+          <div className="space-y-6">
+            <div
+              className={`p-6 rounded-2xl border space-y-6 ${
+                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/80 border-slate-800'
+              }`}
+            >
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Channel Provider</label>
-                <select
-                  value={whatsapp.provider}
-                  onChange={(e) => setWhatsapp({ ...whatsapp, provider: e.target.value })}
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
+                <h2 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  WhatsApp True-Omnichannel Integration & Legal Compliance Desk
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Connect your Personal WhatsApp number or Meta Cloud API for automated trade follow-ups, CIF spot offers, and cargo alerts.
+                </p>
+              </div>
+
+              {/* Legal & Anti-Ban Analysis Matrix */}
+              <div className="p-5 rounded-2xl bg-amber-950/30 border border-amber-600/40 text-amber-200 space-y-3">
+                <div className="flex items-start gap-3">
+                  <Scale className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-xs font-bold text-white">
+                      Legal Compliance & Anti-Ban Analysis: Using Your Own WhatsApp for Automation
+                    </h3>
+                    <p className="text-[11px] text-amber-200/90 mt-1 leading-relaxed">
+                      You asked: <em>"Can I practically use my own WhatsApp for automation, and is it legal?"</em>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-1">
+                  <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                    <span className="font-bold text-white flex items-center gap-1.5 text-[11px]">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      Statutory Legality (India DPDP, TRAI, GDPR, TCPA)
+                    </span>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      <strong>FULLY COMPLIANT FOR B2B:</strong> Outreaching to commercial buyers with legitimate trade interest does not violate statutory cyber laws, provided you immediately honor recipient opt-outs ("Reply STOP"). TradePulse auto-pauses cadences instantly upon opt-out.
+                    </p>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                    <span className="font-bold text-white flex items-center gap-1.5 text-[11px]">
+                      <AlertOctagon className="w-3.5 h-3.5 text-amber-400" />
+                      Meta Terms of Service (Risk of Number Ban)
+                    </span>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      <strong>HIGH BAN RISK IF USED FOR BULK SPAM:</strong> Unofficial headless browser automation of personal numbers violates Meta ToS (Section 3). Blasting cold broadcasts will quickly result in permanent phone number banning.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/40 text-[11px] text-emerald-200">
+                  <strong>TradePulse Recommended Dual-Mode Architecture:</strong> Use your <strong>Personal WhatsApp</strong> with human typing jitter strictly for direct 1-to-1 customer replies (&lt;50 chats/day). Use the <strong>Meta WhatsApp Cloud API</strong> for large automated broadcast cadences.
+                </div>
+              </div>
+
+              {/* Gateway Configuration Form */}
+              <div className="space-y-4 max-w-xl">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Channel Provider Mode</label>
+                  <select
+                    value={whatsapp.provider}
+                    onChange={(e) => setWhatsapp({ ...whatsapp, provider: e.target.value })}
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-medium border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  >
+                    <option value="personal_web_direct">Personal WhatsApp Web Direct Session (Safe Cap: 35-50 chats/day)</option>
+                    <option value="meta_cloud_api">Meta Cloud API (Official WhatsApp Business API - High Volume)</option>
+                    <option value="gupshup">Gupshup Enterprise Messaging Gateway</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Daily Safe Cap (Chats/Day)</label>
+                    <input
+                      type="number"
+                      value={whatsapp.personal_daily_cap || 50}
+                      onChange={(e) => setWhatsapp({ ...whatsapp, personal_daily_cap: parseInt(e.target.value) || 50 })}
+                      className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border outline-none ${
+                        isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Human Typing Delay Jitter</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={whatsapp.typing_delay_jitter || '4500ms - 8200ms'}
+                      className="w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border bg-slate-950/80 border-slate-800 text-slate-400"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">System Access Token / API Key</label>
+                  <input
+                    type="password"
+                    value={whatsapp.api_token}
+                    onChange={(e) => setWhatsapp({ ...whatsapp, api_token: e.target.value })}
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Phone Number ID</label>
+                  <input
+                    type="text"
+                    value={whatsapp.phone_number_id}
+                    onChange={(e) => setWhatsapp({ ...whatsapp, phone_number_id: e.target.value })}
+                    className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border outline-none ${
+                      isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Inbound Webhook Endpoint</label>
+                  <input
+                    type="text"
+                    value={whatsapp.webhook_url}
+                    readOnly
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border bg-slate-950/80 border-slate-800 text-slate-400"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-800/40 flex justify-end">
+                <button
+                  onClick={() => showNotification('WhatsApp & SMS configuration updated!')}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${accentClasses.btn}`}
                 >
-                  <option value="meta_cloud_api">Meta Cloud API (Official WhatsApp Business API)</option>
-                  <option value="gupshup">Gupshup Enterprise Messaging Gateway</option>
-                  <option value="twilio">Twilio Programmable Messaging</option>
-                </select>
+                  <Save className="w-4 h-4" />
+                  Save Channel Gateway
+                </button>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">System Access Token / API Key</label>
-                <input
-                  type="password"
-                  value={whatsapp.api_token}
-                  onChange={(e) => setWhatsapp({ ...whatsapp, api_token: e.target.value })}
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Phone Number ID</label>
-                <input
-                  type="text"
-                  value={whatsapp.phone_number_id}
-                  onChange={(e) => setWhatsapp({ ...whatsapp, phone_number_id: e.target.value })}
-                  className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Inbound Webhook Endpoint</label>
-                <input
-                  type="text"
-                  value={whatsapp.webhook_url}
-                  readOnly
-                  className="w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border bg-slate-950/80 border-slate-800 text-slate-400"
-                />
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-800/40 flex justify-end">
-              <button
-                onClick={() => showNotification('WhatsApp & SMS configuration updated!')}
-                className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 ${accentClasses.btn}`}
-              >
-                <Save className="w-4 h-4" />
-                Save Channel Gateway
-              </button>
             </div>
           </div>
         )}

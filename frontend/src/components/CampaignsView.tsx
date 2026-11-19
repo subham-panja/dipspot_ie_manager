@@ -40,8 +40,13 @@ import {
   TrendingUp,
   BarChart3,
   Search,
-  UserCheck
+  UserCheck,
+  Clock,
+  AlertOctagon,
 } from 'lucide-react';
+import SmtpStopperBanner, { SmtpStopperStatus } from './campaigns/SmtpStopperBanner';
+import OmnichannelInboxView from './campaigns/OmnichannelInboxView';
+import CadencesView from './campaigns/CadencesView';
 
 interface Campaign {
   campaign_id: string;
@@ -134,12 +139,16 @@ const TOKEN_SUGGESTIONS = [
   { token: '{inquiry_notes}', desc: 'Specific Trade Notes' },
 ];
 
-export default function CampaignsView({ initialTab = 'campaigns' }: { initialTab?: 'segments' | 'campaigns' | 'wizard' | 'templates' }) {
+export default function CampaignsView({
+  initialTab = 'campaigns'
+}: {
+  initialTab?: 'segments' | 'campaigns' | 'wizard' | 'templates' | 'inbox' | 'cadences'
+}) {
   const { theme, accentClasses, openSettings } = useTheme();
   const isLight = theme === 'light';
 
-  // Master Tab: 'segments' | 'campaigns' | 'wizard' | 'templates'
-  const [activeTab, setActiveTab] = useState<'segments' | 'campaigns' | 'wizard' | 'templates'>(initialTab);
+  // Master Tab: 'segments' | 'campaigns' | 'wizard' | 'templates' | 'inbox' | 'cadences'
+  const [activeTab, setActiveTab] = useState<'segments' | 'campaigns' | 'wizard' | 'templates' | 'inbox' | 'cadences'>(initialTab);
 
   // Segments state
   const [segments, setSegments] = useState<CustomerSegment[]>([]);
@@ -273,10 +282,55 @@ Commercial Export Desk`,
     }
   };
 
+  // SMTP Stopper State & Actions
+  const [smtpStopper, setSmtpStopper] = useState<SmtpStopperStatus | null>(null);
+
+  const loadSmtpStopper = async () => {
+    try {
+      const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/status');
+      if (res?.status) setSmtpStopper(res.status);
+    } catch (e) {
+      console.error('Failed to load smtp stopper status', e);
+    }
+  };
+
+  const handleHardBreak = async () => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/hard-break', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'Operator manual emergency freeze' }),
+    });
+    if (res?.status) setSmtpStopper(res.status);
+    loadCampaigns();
+  };
+
+  const handleResume = async () => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/resume', {
+      method: 'POST',
+    });
+    if (res?.status) setSmtpStopper(res.status);
+    loadCampaigns();
+  };
+
+  const handleResetCounter = async () => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/reset-counter', {
+      method: 'POST',
+    });
+    if (res?.status) setSmtpStopper(res.status);
+  };
+
+  const handleUpdateLimit = async (newLimit: number) => {
+    const res = await fetchJson<{ status: SmtpStopperStatus }>('/campaigns/smtp-stopper/config', {
+      method: 'PATCH',
+      body: JSON.stringify({ daily_limit: newLimit }),
+    });
+    if (res?.status) setSmtpStopper(res.status);
+  };
+
   useEffect(() => {
     loadSegments();
     loadCampaigns();
     loadTemplates();
+    loadSmtpStopper();
   }, []);
 
   const selectTemplate = (tpl: MessageTemplate) => {
@@ -477,17 +531,21 @@ Commercial Export Desk`,
     }
   };
 
-  // Live Broadcast (Gmail SMTP Simulation)
+  // Live Broadcast (Gmail SMTP Simulation with Stopper Protection)
   const handleBroadcast = async (campaignId: string) => {
     setBroadcastingId(campaignId);
     try {
-      const res = await fetchJson<{ success: boolean; message: string }>(`/campaigns/${campaignId}/broadcast`, {
-        method: 'POST',
-      });
+      const res = await fetchJson<{ success: boolean; message: string; stopper_status?: SmtpStopperStatus }>(
+        `/campaigns/${campaignId}/broadcast`,
+        { method: 'POST' }
+      );
       alert(res.message);
+      if (res.stopper_status) setSmtpStopper(res.stopper_status);
       loadCampaigns();
     } catch (err: any) {
-      alert('Failed to dispatch broadcast: ' + err.message);
+      alert('Broadcast halted: ' + err.message);
+      loadSmtpStopper();
+      loadCampaigns();
     } finally {
       setBroadcastingId(null);
     }
@@ -597,6 +655,17 @@ Commercial Export Desk`,
         </div>
       </div>
 
+      {/* Gmail SMTP Quota & Emergency Hard-Break Stopper Banner */}
+      <SmtpStopperBanner
+        status={smtpStopper}
+        onHardBreak={handleHardBreak}
+        onResume={handleResume}
+        onResetCounter={handleResetCounter}
+        onUpdateLimit={handleUpdateLimit}
+        isLight={isLight}
+        accentClasses={accentClasses}
+      />
+
       {/* Main Two-Column View with Page Left Sub-Navigation */}
       <PageLeftNav
         title="Outreach Hub"
@@ -611,6 +680,24 @@ Commercial Export Desk`,
             onClick: () => setActiveTab('campaigns'),
             active: activeTab === 'campaigns',
             desc: 'Live outbound outreach',
+          },
+          {
+            id: 'inbox',
+            label: 'Omnichannel AI Inbox',
+            icon: <MessageSquare className="w-4 h-4 text-purple-400" />,
+            href: '/campaigns/inbox',
+            onClick: () => setActiveTab('inbox'),
+            active: activeTab === 'inbox',
+            desc: 'Centralized Gmail & WhatsApp CMS',
+          },
+          {
+            id: 'cadences',
+            label: 'Follow-Up Cadences',
+            icon: <Clock className="w-4 h-4 text-emerald-400" />,
+            href: '/campaigns/cadences',
+            onClick: () => setActiveTab('cadences'),
+            active: activeTab === 'cadences',
+            desc: 'Multi-touch automated sequencing',
           },
           {
             id: 'segments',
@@ -651,6 +738,16 @@ Commercial Export Desk`,
         ]}
         activeId={activeTab}
       >
+
+      {/* TAB: OMNICHANNEL AI INBOX */}
+      {activeTab === 'inbox' && (
+        <OmnichannelInboxView isLight={isLight} accentClasses={accentClasses} />
+      )}
+
+      {/* TAB: FOLLOW-UP CADENCES */}
+      {activeTab === 'cadences' && (
+        <CadencesView isLight={isLight} accentClasses={accentClasses} />
+      )}
 
       {/* TAB 1: ACTIVE CAMPAIGNS HUB */}
       {activeTab === 'campaigns' && (

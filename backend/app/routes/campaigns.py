@@ -6,6 +6,8 @@ from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, jsonify, request
 from app.db import get_db, now_iso
 from app.models import Lead
+from app.smtp_stopper import SmtpQuotaManager
+from app.followup_engine import FollowUpEngine
 
 campaigns_bp = Blueprint("campaigns", __name__, url_prefix="/api/campaigns")
 
@@ -400,11 +402,23 @@ def enroll_leads(campaign_id):
 
 @campaigns_bp.route("/<campaign_id>/broadcast", methods=["POST"])
 def broadcast_campaign(campaign_id):
-    """Simulates immediate broadcast through configured Gmail SMTP gateway."""
+    """Simulates immediate broadcast through configured Gmail SMTP gateway with Stopper protection."""
     db = get_db()
     c = db.campaigns.find_one({"campaign_id": campaign_id})
     if not c:
         return jsonify({"error": "Campaign not found"}), 404
+
+    # Pre-send gatekeeper: check Gmail SMTP Stopper quota and emergency freeze
+    target_channel = c.get("channel", "Email")
+    if target_channel in ["Email", "Omnichannel", "All"]:
+        can_send, reason = SmtpQuotaManager.check_can_send()
+        if not can_send:
+            return jsonify({
+                "success": False,
+                "error": f"Broadcast blocked by Gmail SMTP Stopper: {reason}",
+                "is_hard_stopped": True,
+                "stopper_status": SmtpQuotaManager.get_status(),
+            }), 429
 
     enrolled = c.get("enrolled_leads_count", 0)
     if enrolled == 0:
@@ -433,7 +447,7 @@ def broadcast_campaign(campaign_id):
             "dispatch_id": f"DISP-{uuid.uuid4().hex[:8].upper()}",
             "campaign_id": campaign_id,
             "campaign_name": c.get("name"),
-            "channel": c.get("channel", "Email"),
+            "channel": target_channel,
             "recipient": l.get("emails") or l.get("phones") or f"procurement@{company_name.lower().replace(' ', '')[:10]}.com",
             "subject": f"Commercial Offer: {c.get('target_commodity', 'Export Commodity')}",
             "body": f"Dear Sourcing Desk at {company_name},\n\nWe are direct exporters of {c.get('target_commodity', 'Certified Commodity')}.\n\nImmediate container shipment available for destination {l.get('country', '')}.",
@@ -441,6 +455,10 @@ def broadcast_campaign(campaign_id):
             "sent_at": now_iso()
         }
         db.dispatched_messages.insert_one(disp)
+
+    # Track usage in SmtpQuotaManager if sending emails
+    if target_channel in ["Email", "Omnichannel", "All"]:
+        SmtpQuotaManager.record_send(count=min(sent, 10))
 
     db.campaigns.update_one(
         {"campaign_id": campaign_id},
@@ -464,6 +482,7 @@ def broadcast_campaign(campaign_id):
         "opened_count": opened,
         "replied_count": replied,
         "conversions_count": conversions,
+        "stopper_status": SmtpQuotaManager.get_status(),
     })
 
 
@@ -616,6 +635,17 @@ def test_send_template():
     dispatch_id = f"DISP-{uuid.uuid4().hex[:8].upper()}"
 
     if channel == "Email":
+        # Pre-send gatekeeper: check Gmail SMTP Stopper quota and emergency freeze
+        can_send, reason = SmtpQuotaManager.check_can_send()
+        if not can_send:
+            return jsonify({
+                "success": False,
+                "mode": "smtp_stopper_blocked",
+                "error": f"Email transmission blocked by Gmail Mail Stopper: {reason}",
+                "is_hard_stopped": True,
+                "stopper_status": SmtpQuotaManager.get_status(),
+            }), 429
+
         host = smtp.get("host")
         port = int(smtp.get("port") or 587)
         user = smtp.get("username")
@@ -642,6 +672,9 @@ def test_send_template():
                 server.send_message(msg)
                 server.quit()
 
+                # Track live send
+                SmtpQuotaManager.record_send(count=1)
+
                 disp_record = {
                     "dispatch_id": dispatch_id,
                     "channel": "Email",
@@ -663,8 +696,17 @@ def test_send_template():
                     "dispatch_id": dispatch_id,
                     "message": f"Successfully transmitted live commercial email to {recipient} via {host}:{port}!",
                     "record": serialize_doc(disp_record),
+                    "stopper_status": SmtpQuotaManager.get_status(),
                 })
             except Exception as e:
+                err_str = str(e).lower()
+                # Check for Gmail sending limit rejection (550 / 421 / daily limit)
+                if "550" in err_str or "421" in err_str or "limit" in err_str or "quota" in err_str:
+                    SmtpQuotaManager.trigger_hard_break(
+                        reason=f"Live Gmail SMTP rejection encountered ({type(e).__name__}): {str(e)}",
+                        error_details=str(e),
+                    )
+
                 disp_record = {
                     "dispatch_id": dispatch_id,
                     "channel": "Email",
@@ -683,10 +725,12 @@ def test_send_template():
                     "error": f"Live SMTP Transmission Failed ({type(e).__name__}): {str(e)}",
                     "host": host,
                     "port": port,
+                    "stopper_status": SmtpQuotaManager.get_status(),
                     "record": serialize_doc(disp_record),
                 }), 400
 
         # Sandbox Gateway (if no SMTP password yet configured)
+        SmtpQuotaManager.record_send(count=1)
         disp_record = {
             "dispatch_id": dispatch_id,
             "channel": "Email",
@@ -706,6 +750,7 @@ def test_send_template():
             "mode": "sandbox",
             "dispatch_id": dispatch_id,
             "message": f"Commercial email rendered and logged to {recipient} via Sandbox Gateway (Add Gmail App Password in Settings for live relay).",
+            "stopper_status": SmtpQuotaManager.get_status(),
             "record": serialize_doc(disp_record),
         })
 
@@ -762,3 +807,129 @@ def get_recent_dispatches():
     db = get_db()
     records = list(db.dispatched_messages.find({}).sort("sent_at", -1).limit(25))
     return jsonify({"dispatches": [serialize_doc(r) for r in records], "total": len(records)})
+
+
+# ==============================================================================
+# GMAIL SMTP QUOTA TRACKER & EMERGENCY HARD-BREAK STOPPER ROUTES
+# ==============================================================================
+
+@campaigns_bp.route("/smtp-stopper/status", methods=["GET"])
+def get_smtp_stopper_status():
+    """Returns real-time 24h rolling SMTP quota status and hard-stop flags."""
+    status = SmtpQuotaManager.get_status()
+    return jsonify({"status": status})
+
+
+@campaigns_bp.route("/smtp-stopper/hard-break", methods=["POST"])
+def trigger_manual_hard_break():
+    """Manual emergency stop button for operator to freeze all campaigns instantly."""
+    data = request.get_json() or {}
+    reason = data.get("reason", "Operator manual emergency stop triggered from UI.")
+    SmtpQuotaManager.trigger_hard_break(reason=reason, error_details="Manual operator action")
+    return jsonify({
+        "success": True,
+        "message": "Emergency Gmail Mail Stopper engaged. All active campaigns hard-stopped.",
+        "status": SmtpQuotaManager.get_status(),
+    })
+
+
+@campaigns_bp.route("/smtp-stopper/resume", methods=["POST"])
+def resume_from_hard_break():
+    """Resumes campaigns and clears the emergency stopper flag."""
+    res = SmtpQuotaManager.resume_and_clear_hard_break()
+    return jsonify({
+        "success": True,
+        "message": res["message"],
+        "campaigns_resumed": res.get("campaigns_resumed", 0),
+        "status": SmtpQuotaManager.get_status(),
+    })
+
+
+@campaigns_bp.route("/smtp-stopper/reset-counter", methods=["POST"])
+def reset_smtp_counter():
+    """Resets the 24h sent counter (e.g. after rotating credentials)."""
+    status = SmtpQuotaManager.reset_counter()
+    return jsonify({
+        "success": True,
+        "message": "24-hour SMTP sent counter successfully reset to 0.",
+        "status": status,
+    })
+
+
+@campaigns_bp.route("/smtp-stopper/config", methods=["PATCH"])
+def update_smtp_stopper_config():
+    """Configures safe daily limit (100-2000)."""
+    data = request.get_json() or {}
+    daily_limit = int(data.get("daily_limit", 450))
+    auto_resume_hours = int(data.get("auto_resume_hours", 24))
+    status = SmtpQuotaManager.configure_quota(daily_limit=daily_limit, auto_resume_hours=auto_resume_hours)
+    return jsonify({
+        "success": True,
+        "message": f"SMTP daily limit configured to {daily_limit} emails/day.",
+        "status": status,
+    })
+
+
+# ==============================================================================
+# AUTOMATED OMNICHANNEL CADENCE ROUTES
+# ==============================================================================
+
+@campaigns_bp.route("/cadences", methods=["GET"])
+def list_followup_cadences():
+    """Returns all omnichannel follow-up cadences."""
+    cadences = FollowUpEngine.get_cadences()
+    return jsonify({
+        "cadences": [serialize_doc(c) for c in cadences],
+        "total": len(cadences),
+    })
+
+
+@campaigns_bp.route("/cadences/enroll", methods=["POST"])
+def enroll_lead_in_cadence():
+    """Enrolls a lead into an automated omnichannel cadence."""
+    data = request.get_json() or {}
+    lead_id = data.get("lead_id")
+    cadence_id = data.get("cadence_id", "CAD-COMMERCIAL-OUTREACH")
+    custom_params = data.get("custom_params", {})
+
+    if not lead_id:
+        return jsonify({"error": "lead_id is required"}), 400
+
+    try:
+        enrollment = FollowUpEngine.enroll_lead(
+            lead_id=int(lead_id),
+            cadence_id=cadence_id,
+            custom_params=custom_params
+        )
+        return jsonify({
+            "success": True,
+            "message": f"Lead #{lead_id} successfully enrolled in cadence '{enrollment.get('cadence_name')}'",
+            "enrollment": serialize_doc(enrollment),
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@campaigns_bp.route("/cadences/run-due", methods=["POST"])
+def run_due_followups():
+    """Dispatches all due follow-up touchpoints across enrolled leads."""
+    result = FollowUpEngine.execute_due_followups()
+    return jsonify({
+        "success": True,
+        "result": result,
+    })
+
+
+@campaigns_bp.route("/cadences/enrollments", methods=["GET"])
+def list_cadence_enrollments():
+    """Lists lead enrollments, including active steps and auto-paused states."""
+    db = get_db()
+    status_filter = request.args.get("status")
+    q = {}
+    if status_filter:
+        q["status"] = status_filter
+    enrollments = list(db.cadence_enrollments.find(q).sort("updated_at", -1).limit(50))
+    return jsonify({
+        "enrollments": [serialize_doc(e) for e in enrollments],
+        "total": len(enrollments),
+    })
