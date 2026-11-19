@@ -326,7 +326,8 @@ function CrawlerStepperContent() {
     if (cCountry && cCountry !== 'Global') params.append('country', cCountry);
     if (jId) params.append('job_id', String(jId));
 
-    router.push(`/leads?${params.toString()}`);
+    const targetPath = lType === 'supplier' ? '/leads/suppliers' : '/leads/importers';
+    router.push(`${targetPath}?${params.toString()}`);
   };
 
   return (
