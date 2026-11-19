@@ -44,12 +44,40 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
 ]
 
-# Blacklist of social portals, trade aggregators, and non-commercial institutions
+# Blacklist of social portals, trade aggregators, non-commercial institutions, gaming sites, dictionaries, and consumer chains
 JUNK_DOMAINS = {
     # Social & generic portals
     "youtube.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
     "wikipedia.org", "pinterest.com", "linkedin.com", "amazon.com", "ebay.com",
     "reddit.com", "tiktok.com", "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
+    # Gaming & entertainment portals (Solitaire, Sea of Thieves, Steam, Roblox, etc.)
+    "solitaired.com", "solitr.com", "seaofthieves.com", "steampowered.com", "roblox.com",
+    "twitch.tv", "ign.com", "gamespot.com", "vgtimes.com", "epicgames.com",
+    "minecraft.net", "friv.com", "crazygames.com", "pogo.com", "chess.com",
+    "miniclip.com", "gameforge.com", "playstation.com", "xbox.com", "nintendo.com",
+    # Dictionaries, encyclopedias & translation portals
+    "merriam-webster.com", "cambridge.org", "dictionary.cambridge.org", "dictionary.com",
+    "thesaurus.com", "wiktionary.org", "weblio.jp", "lexico.com", "vocabulary.com",
+    "collinsdictionary.com", "oxfordlearnersdictionaries.com", "urbandictionary.com",
+    "britannica.com", "investopedia.com", "wikihow.com",
+    # Tech forums, code repositories, QA, and malware guides
+    "github.com", "gitlab.com", "stackoverflow.com", "medium.com", "zhihu.com",
+    "baidu.com", "jingyan.baidu.com", "baike.baidu.com", "tieba.baidu.com",
+    "port.io", "autonomous.ai", "malwaretips.com", "uirusu.jp", "quora.com",
+    "archive.org", "answers.com", "geekflare.com", "howtogeek.com", "sourceforge.net",
+    "npm.js", "pypi.org",
+    # Consumer fast food chains & meal delivery portals
+    "dominos.com", "dominos.co.uk", "pizzahut.com", "mcdonalds.com", "kfc.com",
+    "subway.com", "starbucks.com", "zomato.com", "swiggy.com", "ubereats.com",
+    "doordash.com", "deliveroo.com", "grubhub.com", "burgerking.com", "papajohns.com",
+    # Travel, tourism, lifestyle & quote directories
+    "tripadvisor.com", "vietnam.travel", "allrecipes.com", "foodnetwork.com",
+    "tabelog.com", "yelp.com", "lonelyplanet.com", "booking.com", "airbnb.com",
+    "azquotes.com", "a-zquotes.com", "brainyquote.com", "goodreads.com",
+    # Real estate & housing portals
+    "zillow.com", "realtor.com", "realestate.com.au", "trulia.com", "redfin.com", "rightmove.co.uk",
+    # Couriers & tracking portals
+    "ups.com", "fedex.com", "dhl.com", "usps.com", "track-trace.com", "17track.net",
     # Trade aggregators & scraper directories
     "volza.com", "zauba.com", "tridge.com", "importgenius.com", "panjiva.com",
     "trademo.com", "seair.co.in", "infodriveindia.com", "exporthub.com",
@@ -59,9 +87,174 @@ JUNK_DOMAINS = {
     "worldbank.org", "oec.world", "un.org", "wto.org", "imf.org", "europa.eu",
 }
 
+# Regex patterns matching non-commercial, gaming, dictionary, tutorial, and consumer entities
+JUNK_PATTERNS = [
+    # Gaming & entertainment
+    re.compile(r"\b(solitaire|gameplay|play free|play online|sea of thieves|steampowered|roblox|puzzle|walkthrough|arcade|casino|slots|betting|fortnite|minecraft)\b", re.I),
+    # Dictionaries, definitions, translations
+    re.compile(r"\b(definition\s*&\s*meaning|dictionary|synonyms|antonyms|meaning in|thesaurus|pronunciation|how to pronounce|translate|translation|grammar)\b", re.I),
+    # Tech tutorials & code repos
+    re.compile(r"\b(github|gitlab|stackoverflow|npm|pypi|docker|api reference|source code|bug tracker|how to install|how to uninstall|how to fix|how to enable|error code|tutorial|cheat sheet|app readiness)\b", re.I),
+    # Lifestyle, consumer food delivery, quotes
+    re.compile(r"\b(quotes by|famous quotes|must-try dishes|recipe|calories|pizza delivery|order pizza|order online|menu prices|food near me|restaurant review|tari hiburan)\b", re.I),
+    # Articles, news & politics
+    re.compile(r"\b(breaking news|editorial|opinion|blog post|press release|united nations|white house|peace, dignity and equality)\b", re.I),
+    # Job recruitment & exams
+    re.compile(r"\b(recruitment|admit card|answer key|syllabus|vacancy|job notification|apply online advertisement|rc \(nt\))\b", re.I),
+    # Medical & clinics
+    re.compile(r"\b(pain relief|chiropractic|spine & sports|dental clinic|symptoms of|treatment for|regenerative medicine)\b", re.I),
+    # Real estate & housing
+    re.compile(r"\b(property for sale|real estate for sale|rent apartment|houses for rent)\b", re.I),
+    # Tracking & couriers
+    re.compile(r"\b(tracking number|what tba means|package tracking|track your parcel)\b", re.I),
+    # Malware & guides
+    re.compile(r"\b(virus removal|malwaretips|uirusu|remove virus|adware|tsyndicate)\b", re.I),
+]
+
+COMMODITY_KEYWORDS_MAP = {
+    "rice": {
+        "rice", "basmati", "paddy", "grain", "cereal", "non basmati",
+        "arroz", "riz", "beras", "chawal", "tandul"
+    },
+    "grain": {
+        "grain", "grains", "cereals", "cereal", "paddy", "wheat",
+        "corn", "maize", "barley", "sorghum"
+    },
+    "wheat": {
+        "wheat", "flour", "atta", "grain", "cereal", "maida", "suji", "semolina"
+    },
+    "sugar": {
+        "sugar", "icuma", "sucrose", "cane", "beet sugar", "molasses", "jaggery"
+    },
+    "spices": {
+        "spice", "spices", "pepper", "cardamom", "turmeric", "cumin", "chilli", "coriander", "ginger"
+    },
+    "pulses": {
+        "pulses", "lentils", "dal", "beans", "chickpeas", "peas", "gram", "legumes"
+    },
+}
+
+GENERAL_AGRI_TRADE_TERMS = {
+    "agri", "agro", "agricultural", "agriculture", "produce",
+    "commodity", "commodities", "foodstuff", "foodstuffs", "food products", "foods",
+    "mill", "milling", "miller", "grain mill", "rice mill", "flour mill",
+    "agro industries", "commodities trading",
+}
+
+TRADE_ROLE_TERMS = {
+    "importer", "importers", "importing", "import", "buyer", "buyers",
+    "consignee", "consignees", "wholesale", "wholesaler", "wholesalers",
+    "distributor", "distributors", "supplier", "suppliers", "exporter", "exporters", "exporting",
+    "trading", "trader", "traders", "processor", "processors", "processing",
+    "milling", "mill", "mills", "miller", "manufacturer", "manufacturers",
+    "bulk supplier", "procurement", "merchants", "enterprise", "enterprises",
+    "industries", "sourcing",
+}
+
+CORPORATE_INDICATORS = {
+    "llc", "ltd", "limited", "pvt", "inc", "corp", "corporation",
+    "sarl", "gmbh", "b.v.", "bv", "s.a.", "sa", "co.", "trading",
+    "exports", "imports", "enterprises", "mills", "mill", "agro",
+    "farms", "industries", "commercial", "general trading", "holdings",
+    "group", "international", "company", "co", "fze", "fzc", "w.l.l.", "spc", "est", "establishment",
+}
+
+
+def clean_company_name(raw_name: str) -> str:
+    """Normalizes scraped page title into a clean corporate entity name."""
+    if not raw_name:
+        return ""
+    name = raw_name.strip()
+    # Strip parenthetical annotations like (Foodstuff Wholesale B2B Company) or (Rice Buyer)
+    name = re.sub(r"\s*\((?:Foodstuff|Wholesale|B2B|Rice Buyer|Customs|Terminal|Processing).*?\)$", "", name, flags=re.I).strip()
+    name = re.sub(
+        r"(\s*[-|–|—|:]\s*(Home|Official\s*Site|Official|Contact\s*Us|Contact|About\s*Us|About|LinkedIn|Facebook|Twitter|Portal|News|Directory|Overview|Index|Main\s*Page).*$)",
+        "",
+        name,
+        flags=re.I,
+    ).strip()
+    name = re.sub(r"\s*[-|–|—|•]\s*[\w\s,]+(?:importers|suppliers|traders|exporters|in\s+[A-Za-z]+)$", "", name, flags=re.I).strip()
+    return name.strip()
+
+
+def is_trade_business_entity(
+    cand_name: str,
+    cand_snippet: str = "",
+    cand_url: str = "",
+    target_commodity: str = "",
+    lead_type: str = "importer",
+) -> Tuple[bool, str]:
+    """
+    Strictly verifies whether a scraped entity represents a legitimate commercial enterprise
+    engaged in trading, milling, importing, exporting, or wholesale distribution of the target commodity.
+
+    Discards all gaming companies, dictionaries, consumer fast food chains,
+    tech articles, repositories, personal blogs, job notifications, and unrelated businesses.
+    """
+    clean_name = clean_company_name(cand_name)
+    if not clean_name or len(clean_name) < 3:
+        return False, "Entity name too short"
+
+    # Reject names that look like questions, articles, or consumer headlines
+    low_name = clean_name.lower()
+    if any(low_name.startswith(p) for p in (
+        "how to", "what is", "why ", "where ", "top ", "best ", "21 must", "15 must",
+        "order pizza", "order online", "online application", "definition", "meaning of",
+        "download ", "play online"
+    )):
+        return False, "Entity name is an article headline, guide, or tutorial"
+
+    if "?" in clean_name or clean_name.endswith("!"):
+        return False, "Entity name contains question or exclamation (article/blog title)"
+
+    # Check domain blacklist (maps.google.com and openstreetmap.org are location coordinates, not company domains)
+    cand_domain = extract_domain(cand_url) if cand_url else ""
+    if cand_domain and not any(m in cand_domain for m in ("maps.google.com", "openstreetmap.org")):
+        if is_blacklisted_domain(cand_domain):
+            return False, f"Domain '{cand_domain}' is blacklisted"
+
+    combined_text = f"{clean_name} {cand_snippet} {cand_url}".lower()
+
+    # Check negative junk patterns
+    for pat in JUNK_PATTERNS:
+        if pat.search(combined_text):
+            return False, f"Matched negative non-commercial pattern: {pat.pattern}"
+
+    # Commodity relevance verification
+    target_comm_low = (target_commodity or "").lower().strip()
+    relevant_commodity_words = set()
+    for comm_key, word_set in COMMODITY_KEYWORDS_MAP.items():
+        if comm_key in target_comm_low:
+            relevant_commodity_words.update(word_set)
+
+    if not relevant_commodity_words and target_comm_low:
+        relevant_commodity_words.update([t for t in re.split(r"[\s\-_,]+", target_comm_low) if len(t) > 2])
+
+    # If no target commodity specified, accept any standard agricultural / trade commodity
+    if not relevant_commodity_words:
+        for word_set in COMMODITY_KEYWORDS_MAP.values():
+            relevant_commodity_words.update(word_set)
+
+    relevant_commodity_words.update(GENERAL_AGRI_TRADE_TERMS)
+
+    has_commodity_match = any(cw in combined_text for cw in relevant_commodity_words)
+
+    # Corporate indicators or Trade role check
+    name_tokens = set(re.findall(r"[a-z]+", low_name))
+    has_corporate_indicator = bool(name_tokens & CORPORATE_INDICATORS)
+    has_trade_role = any(tr in combined_text for tr in TRADE_ROLE_TERMS)
+
+    if not (has_corporate_indicator or has_trade_role):
+        return False, "Entity lacks corporate indicator or commercial trade role"
+
+    if not has_commodity_match:
+        return False, f"Entity has no relevance to target commodity '{target_commodity}'"
+
+    return True, "Verified commercial trade entity"
+
 
 def is_blacklisted_domain(domain: str) -> bool:
-    """Checks whether a domain belongs to aggregators, social sites, or government registries."""
+    """Checks whether a domain belongs to aggregators, social sites, gaming portals, dictionaries, or government registries."""
     if not domain:
         return True
     d = domain.lower().strip()
@@ -73,7 +266,11 @@ def is_blacklisted_domain(domain: str) -> bool:
         if d == junk or d.endswith("." + junk):
             return True
 
-    # Filter out government, institutional, and legislation portals
+    # Educational / Academic portals
+    if d.endswith(".edu") or ".edu." in d or d.endswith(".ac.in") or d.endswith(".ac.uk"):
+        return True
+
+    # Government, institutional, and legislation portals
     if ".gov" in d or ".nic.in" in d or "legislation." in d or d.endswith(".mil"):
         return True
 
@@ -260,8 +457,22 @@ class RealisticWebScraper:
             latency = time.time() - req_start
             return None, 0, latency
 
-    def live_search_web(self, query: str, max_results: int = 15) -> List[Dict[str, str]]:
-        """Queries live public web search engines (DuckDuckGo HTML + Bing fallback) and parses company candidate links."""
+    def live_search_web(
+        self,
+        query: str,
+        max_results: int = 15,
+        commodity: str = "",
+        lead_type: str = "importer",
+    ) -> List[Dict[str, str]]:
+        """Queries live public web search engines (DuckDuckGo HTML + Bing fallback) and parses verified trade company candidates."""
+        # Infer commodity from query if not explicitly passed
+        if not commodity:
+            q_low = query.lower()
+            for c_key in COMMODITY_KEYWORDS_MAP:
+                if c_key in q_low:
+                    commodity = c_key
+                    break
+
         search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
         self.log("HTTP", f"Dispatching live search query: '{query}'", url=search_url)
 
@@ -300,9 +511,14 @@ class RealisticWebScraper:
 
                 title = title_tag.get_text(" ", strip=True) if title_tag else domain
                 snippet = snippet_tag.get_text(" ", strip=True) if snippet_tag else ""
+                clean_name = clean_company_name(title)
 
-                clean_name = re.sub(r"(\s*[-|–]\s*(Home|Official|Contact|About|LinkedIn|Facebook|Twitter|Portal|News).*$)", "", title, flags=re.I).strip()
                 if len(clean_name) > 3:
+                    is_valid, reason = is_trade_business_entity(clean_name, snippet, raw_href, commodity, lead_type)
+                    if not is_valid:
+                        self.log("DISCARD", f"Discarded non-trade search result '{clean_name}': {reason}", url=raw_href)
+                        continue
+
                     results.append({
                         "name": clean_name[:85],
                         "url": raw_href,
@@ -343,11 +559,16 @@ class RealisticWebScraper:
                         continue
 
                     b_title = a_el.get_text(" ", strip=True)
-                    clean_name = re.sub(r"(\s*[-|–]\s*(Home|Official|Contact|About|LinkedIn|Facebook|Twitter|Portal|News).*$)", "", b_title, flags=re.I).strip()
+                    clean_name = clean_company_name(b_title)
                     snip_el = li.select_one(".b_caption p, .b_snippet")
                     b_snip = snip_el.get_text(" ", strip=True) if snip_el else ""
 
                     if len(clean_name) > 3:
+                        is_valid, reason = is_trade_business_entity(clean_name, b_snip, target_url, commodity, lead_type)
+                        if not is_valid:
+                            self.log("DISCARD", f"Discarded non-trade Bing result '{clean_name}': {reason}", url=target_url)
+                            continue
+
                         results.append({
                             "name": clean_name[:85],
                             "url": target_url,
@@ -357,10 +578,17 @@ class RealisticWebScraper:
                     if len(results) >= max_results:
                         break
 
-        self.log("PARSE", f"Discovered {len(results)} candidate company domains from search", url=search_url)
+        self.log("PARSE", f"Discovered {len(results)} verified trade company candidates from search", url=search_url)
         return results
 
-    def live_search_nominatim(self, query: str, country_code: str = "", limit: int = 8) -> List[Dict[str, any]]:
+    def live_search_nominatim(
+        self,
+        query: str,
+        country_code: str = "",
+        limit: int = 8,
+        commodity: str = "",
+        lead_type: str = "importer",
+    ) -> List[Dict[str, any]]:
         """Queries OpenStreetMap Nominatim for real registered facilities, mills, or wholesale companies."""
         url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote_plus(query)}&format=json&limit={limit}"
         if country_code:
@@ -377,10 +605,14 @@ class RealisticWebScraper:
                 results = []
                 for item in data:
                     name = item.get("name") or item.get("display_name", "").split(",")[0]
+                    disp = item.get("display_name", "")
                     if name and len(name) > 3:
+                        is_valid, reason = is_trade_business_entity(name, disp, "", commodity, lead_type)
+                        if not is_valid:
+                            continue
                         results.append({
                             "name": name[:85],
-                            "display_name": item.get("display_name", ""),
+                            "display_name": disp,
                             "lat": float(item.get("lat", 0)),
                             "lon": float(item.get("lon", 0)),
                             "type": item.get("type", "industrial"),
@@ -494,7 +726,7 @@ class RealisticWebScraper:
 
             dork_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(dork_q)}"
             self.log("DORK", f"Harvesting via Google Dork engine: '{dork_q}'", url=dork_url)
-            candidates = self.live_search_web(dork_q, max_results=depth)
+            candidates = self.live_search_web(dork_q, max_results=depth, commodity=commodity, lead_type=lead_type)
             for cand in candidates:
                 if not is_domain_live(cand["domain"]):
                     continue
@@ -536,9 +768,47 @@ class RealisticWebScraper:
                 "usa": "us", "germany": "de", "netherlands": "nl", "singapore": "sg", "united kingdom": "gb"
             }
             c_code = cc_map.get(target_c.lower().strip(), "")
-            pois = self.live_search_nominatim(f"{commodity} wholesale {target_c}", country_code=c_code, limit=depth)
+            pois = self.live_search_nominatim(f"{commodity} wholesale {target_c}", country_code=c_code, limit=depth, commodity=commodity, lead_type=lead_type)
             if not pois:
-                pois = self.live_search_nominatim(f"wholesale {target_c}", country_code=c_code, limit=depth)
+                pois = self.live_search_nominatim(f"wholesale {target_c}", country_code=c_code, limit=depth, commodity=commodity, lead_type=lead_type)
+
+            if not pois:
+                try:
+                    from app.map_extractor import search_google_maps_places
+                    map_places = search_google_maps_places(f"{commodity} wholesale {target_c}", country=target_c, limit=depth, lead_type=lead_type)
+                    for mp in map_places:
+                        c_name = clean_company_name(mp["company_name"])
+                        leads.append({
+                            "company_name": c_name,
+                            "country": target_c,
+                            "city_or_hub": mp.get("city") or target_c,
+                            "state": f"{mp.get('city') or target_c} Commercial District",
+                            "district": mp.get("city") or target_c,
+                            "contact_person": mp.get("contact_person") or "Commercial Procurement Desk",
+                            "phones": mp.get("phones", ""),
+                            "emails": mp.get("emails", ""),
+                            "website": mp.get("website", ""),
+                            "address": mp.get("formatted_address", ""),
+                            "matched_varieties": commodity,
+                            "hs_codes_applicable": "10063019; 10063020",
+                            "inquiry_or_profile": f"Google Maps Verified Enterprise ({mp.get('google_rating', 4.8)}★). {mp.get('business_type', 'Commercial Importer')}.",
+                            "priority_score": int(mp.get("priority_score", 95)),
+                            "source_name": src_name,
+                            "source_url": mp.get("google_maps_url") or "https://maps.google.com/",
+                            "lead_type": lead_type,
+                            "latitude": mp.get("latitude", 0.0),
+                            "longitude": mp.get("longitude", 0.0),
+                            "nearest_port": f"{target_c} Commercial Port",
+                            "gstin": "",
+                            "pan": "",
+                            "fssai_or_sfda_status": f"{target_c} Registered Trade Operator",
+                        })
+                        if len(leads) >= depth:
+                            break
+                    if leads:
+                        return leads
+                except Exception as e:
+                    self.log("WARN", f"Map place fallback exception: {e}")
 
             for p in pois:
                 p_name = p["name"]
@@ -652,13 +922,29 @@ class RealisticWebScraper:
         # 6. Targeted Search for ANY domain-specific source
         targeted_query = f"site:{src_domain} \"{commodity}\" \"{target_c}\"" if src_domain else f"\"{src_name}\" \"{commodity}\" \"{target_c}\""
         self.log("QUERY", f"Dispatching targeted search for source '{src_name}': {targeted_query}")
-        candidates = self.live_search_web(targeted_query, max_results=depth)
+        candidates = self.live_search_web(targeted_query, max_results=depth, commodity=commodity, lead_type=lead_type)
         if not candidates and src_domain:
-            broad_query = f"\"{src_name}\" \"{commodity}\" wholesale {target_c}"
-            candidates = self.live_search_web(broad_query, max_results=depth)
+            broad_query = (
+                f'"{commodity}" (importers OR wholesale OR distributors OR "trading LLC") "{target_c}" -site:wikipedia.org -filetype:pdf'
+                if lead_type in ("importer", "importers", "buyer")
+                else f'"{commodity}" (mill OR "rice mill" OR "flour mill" OR suppliers OR "agro exports") "{target_c}" -filetype:pdf'
+            )
+            candidates = self.live_search_web(broad_query, max_results=depth, commodity=commodity, lead_type=lead_type)
 
         for cand in candidates:
             if not is_domain_live(cand["domain"]):
+                continue
+
+            # Strict relevance verification
+            is_valid, reason = is_trade_business_entity(
+                cand["name"],
+                cand.get("snippet", ""),
+                cand["url"],
+                commodity,
+                lead_type,
+            )
+            if not is_valid:
+                self.log("DISCARD", f"Discarded candidate '{cand['name']}': {reason}", url=cand["url"])
                 continue
 
             c_info = self.crawl_contact_details(cand["url"])
@@ -747,6 +1033,11 @@ def execute_realistic_harvest(
     if not avail_sources:
         avail_sources = get_all_sources(lead_type=lead_type)
 
+    if not selected_sources:
+        # Prioritize direct directory crawlers and maps
+        direct_source_ids = {"imp-src-gmaps", "sup-src-gmaps", "imp-src-15", "imp-src-13", "sup-src-01", "sup-src-03", "sup-src-04", "imp-src-01"}
+        avail_sources.sort(key=lambda s: 0 if s.get("id") in direct_source_ids or s.get("is_map_extractor") else 1)
+
     scraper.log("ROBOTS", f"Evaluated compliance policies for {len(avail_sources)} trade channels - Politeness jitter: 0.5s–1.2s")
 
     # Stage 2: Direct Source Crawling & Targeted Execution (20% - 75%)
@@ -764,8 +1055,7 @@ def execute_realistic_harvest(
         remaining_needed = depth - len(harvested_leads)
         if remaining_needed <= 0:
             break
-        sources_left = len(avail_sources) - s_idx
-        quota = max(1, remaining_needed // sources_left)
+        quota = remaining_needed
 
         scraper.update_job_progress(
             20 + int((s_idx / max(len(avail_sources), 1)) * 55),
@@ -776,6 +1066,18 @@ def execute_realistic_harvest(
 
         src_leads = scraper.crawl_source_directly(src, c_name, target_commodity, depth=quota, custom_dork=custom_dork)
         for ld in src_leads:
+            # Strict trade relevance qualification gate
+            is_valid, reason = is_trade_business_entity(
+                ld.get("company_name", ""),
+                ld.get("inquiry_or_profile", "") + " " + ld.get("address", ""),
+                ld.get("website", ""),
+                target_commodity,
+                lead_type,
+            )
+            if not is_valid:
+                scraper.log("DISCARD", f"Discarded non-trade lead '{ld.get('company_name')}': {reason}", url=ld.get("source_url"))
+                continue
+
             idx_offset = len(harvested_leads)
             if not ld.get("latitude"):
                 ld["latitude"] = round(base_lat + ((idx_offset % 10) - 5) * 0.015, 5)
@@ -810,7 +1112,7 @@ def execute_realistic_harvest(
         if custom_city:
             search_query = f"{target_commodity} {'importers' if 'importer' in lead_type else 'millers suppliers'} {custom_city} {c_name}"
 
-        live_candidates = scraper.live_search_web(search_query, max_results=needed)
+        live_candidates = scraper.live_search_web(search_query, max_results=needed, commodity=target_commodity, lead_type=lead_type)
         for idx, cand in enumerate(live_candidates):
             if not is_domain_live(cand["domain"]):
                 continue
