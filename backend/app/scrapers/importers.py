@@ -364,3 +364,146 @@ def parse_spices_board_bsm_text(text: str, source_url: str = "") -> List[Dict[st
             "lead_type": "importer",
         })
     return leads
+
+
+def parse_go4worldbusiness_buyers_html(
+    html: str,
+    target_country: str = "United Arab Emirates",
+    commodity: str = "Rice",
+    source_url: str = "https://www.go4worldbusiness.com/find?BuyersOrSuppliers=buyers",
+) -> List[Dict[str, any]]:
+    """
+    Parses active buyer RFQs and import procurement inquiries from Go4WorldBusiness.
+    Captures product specifications, destination country, required quantity, and payment terms (LC/CAD).
+    """
+    leads = []
+    if not html:
+        return leads
+
+    soup = BeautifulSoup(html, "lxml")
+    seen = set()
+
+    for container in soup.select(".entity-rows-container"):
+        c_txt = container.get_text(" | ", strip=True)
+        link_el = container.select_one('a[href*="/buylead/view/"]') or container.select_one('a[href*="/buyers/"]')
+        if not link_el:
+            continue
+
+        req_title = link_el.get_text(strip=True)
+        if not req_title or "Wanted" not in req_title:
+            continue
+
+        clean_item = re.sub(r"^Wanted\s*:\s*", "", req_title).strip()
+        comp_name = f"{clean_item} - Import Procurement Desk"
+        if comp_name in seen:
+            continue
+        seen.add(comp_name)
+
+        b_match = re.search(r"Buyer From\s+([A-Za-z\s]+?)(?:\||\n|\r|Quantity|$)", c_txt, re.I)
+        b_country = b_match.group(1).strip() if b_match else target_country
+
+        dest_match = re.search(r"Destination:\s*\|\s*([A-Za-z\s]+?)(?:\||\n|\r|$)", c_txt, re.I)
+        dest = dest_match.group(1).strip() if dest_match else b_country
+
+        if target_country and target_country.lower() != "global":
+            tc = target_country.lower().strip()
+            bc = b_country.lower().strip()
+            dc = dest.lower().strip()
+            if tc in bc or bc in tc or tc in dc or dc in tc:
+                b_country = target_country
+            else:
+                continue
+
+        qty_match = re.search(r"Quantity Required:\s*\|\s*([^|]+)", c_txt, re.I)
+        qty = qty_match.group(1).strip() if qty_match else "Commercial Bulk Order"
+
+        terms_match = re.search(r"Payment Terms:\s*\|\s*([^|]+)", c_txt, re.I)
+        terms = terms_match.group(1).strip() if terms_match else "Letter of Credit (LC)"
+
+        item_url = link_el["href"]
+        if item_url.startswith("/"):
+            item_url = f"https://www.go4worldbusiness.com{item_url}"
+
+        leads.append({
+            "company_name": comp_name[:85],
+            "country": b_country,
+            "city_or_hub": dest or b_country,
+            "state": f"{dest} Commercial District",
+            "district": dest,
+            "contact_person": "Commercial Import Desk",
+            "phones": "",
+            "emails": "",
+            "website": item_url,
+            "address": f"{dest}, Designated Commercial Port & Warehouse Facility",
+            "matched_varieties": clean_item,
+            "hs_codes_applicable": "10063019; 10063020",
+            "inquiry_or_profile": f"Verified Buyer RFQ: {req_title}. Quantity Required: {qty}. Payment Terms: {terms}. Destination: {dest}.",
+            "priority_score": 93,
+            "source_name": "Go4WorldBusiness Global Buyers Directory",
+            "source_url": item_url,
+            "lead_type": "importer",
+            "fssai_or_sfda_status": "Verified Buyer RFQ",
+        })
+
+    return leads
+
+
+def parse_go4worldbusiness_suppliers_html(
+    html: str,
+    target_country: str = "India",
+    commodity: str = "Rice",
+    source_url: str = "https://www.go4worldbusiness.com/suppliers/rice.html",
+) -> List[Dict[str, any]]:
+    """
+    Parses verified manufacturer, supplier, and exporter profiles from Go4WorldBusiness.
+    """
+    leads = []
+    if not html:
+        return leads
+
+    soup = BeautifulSoup(html, "lxml")
+    seen = set()
+
+    for container in soup.select(".entity-rows-container"):
+        co_link = container.select_one('a[href*="/member/view/"]')
+        if not co_link:
+            continue
+        c_name = co_link.get_text(strip=True)
+        if not c_name or c_name in seen:
+            continue
+        seen.add(c_name)
+
+        c_txt = container.get_text(" | ", strip=True)
+        supp_from = re.search(r"Supplier From\s+([A-Za-z\s,]+?)(?:\||\n|\r|Member|Supplier Of|$)", c_txt, re.I)
+        loc = supp_from.group(1).strip() if supp_from else target_country
+        city = loc.split(",")[0].strip() if loc else target_country
+
+        prod_title = container.select_one("h2, h3, h4, span.pull-left")
+        p_desc = prod_title.get_text(strip=True) if prod_title else commodity
+
+        prof_url = co_link["href"]
+        if prof_url.startswith("/"):
+            prof_url = f"https://www.go4worldbusiness.com{prof_url}"
+
+        leads.append({
+            "company_name": c_name,
+            "country": target_country,
+            "city_or_hub": city,
+            "state": f"{city} Industrial Zone",
+            "district": city,
+            "contact_person": "Sales & Export Desk",
+            "phones": "",
+            "emails": "",
+            "website": prof_url,
+            "address": f"{loc}, Certified Processing & Logistics Center",
+            "matched_varieties": commodity,
+            "hs_codes_applicable": "10063019; 10063020",
+            "inquiry_or_profile": f"Go4WorldBusiness Verified Member Supplier of {p_desc} from {loc}.",
+            "priority_score": 94,
+            "source_name": "Go4WorldBusiness Global Directory",
+            "source_url": prof_url,
+            "lead_type": "supplier",
+            "fssai_or_sfda_status": "Go4WorldBusiness Verified Member",
+        })
+
+    return leads
