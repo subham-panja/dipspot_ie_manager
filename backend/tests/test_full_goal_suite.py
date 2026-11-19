@@ -281,3 +281,78 @@ def test_sources_configuration_toggle_and_crawler_sync(client):
     assert d4["disabled_count"] == 0
 
 
+def test_expanded_trade_sources_registry():
+    """Verify registry has been expanded beyond 300 total verified sources with 120+ Indian bodies."""
+    all_s = get_all_sources()
+    assert len(all_s) >= 300, f"Expected >= 300 total sources, got {len(all_s)}"
+    assert len(IMPORTER_SOURCES) >= 160, f"Expected >= 160 importers, got {len(IMPORTER_SOURCES)}"
+    assert len(SUPPLIER_SOURCES) >= 160, f"Expected >= 160 suppliers, got {len(SUPPLIER_SOURCES)}"
+    indian = get_indian_supplier_sources()
+    assert len(indian) >= 120, f"Expected >= 120 Indian suppliers, got {len(indian)}"
+
+
+def test_realistic_scraper_job_tracking_and_api(client, app):
+    """Test RealisticWebScraper progress tracking, log writing, and job endpoints."""
+    from app.real_scraper import RealisticWebScraper
+
+    test_job_id = 9999
+    scraper = RealisticWebScraper(job_id=test_job_id)
+
+    # 1. Update progress
+    scraper.update_job_progress(25, "Crawling live B2B registry", current_url="https://html.duckduckgo.com/html/", leads_found=3)
+    scraper.log("HTTP", "GET https://example.com returned 200", url="https://example.com", latency=0.45)
+    scraper.log("PARSE", "Extracted 3 candidate company profiles")
+
+    # 2. Query job detail endpoint
+    r = client.get(f"/api/scrape/jobs/{test_job_id}")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert "job" in data
+    job = data["job"]
+    assert job["job_id"] == test_job_id
+    assert job["progress_pct"] == 25
+    assert job["current_step"] == "Crawling live B2B registry"
+    assert len(job["logs"]) >= 2
+    assert any("Extracted 3 candidate" in lg["message"] for lg in job["logs"])
+
+    # 3. Query live job endpoint
+    r_live = client.get("/api/scrape/jobs/live")
+    assert r_live.status_code == 200
+    live_data = r_live.get_json()
+    assert live_data["job"] is not None
+    assert live_data["job"]["job_id"] == test_job_id
+
+
+def test_realistic_harvest_execution_importer(app, client):
+    """Test execute_realistic_harvest creates verified leads strictly for chosen country."""
+    from app.real_scraper import execute_realistic_harvest
+
+    mongo_db = get_db()
+    initial_count = mongo_db.leads.count_documents({"country": "United Arab Emirates", "lead_type": "importer"})
+
+    harvested = execute_realistic_harvest(
+        app=app,
+        lead_type="importer",
+        country="United Arab Emirates",
+        commodity="Basmati Rice",
+        depth=3,
+        custom_label="UAE Realistic Verification Test",
+        job_id=8888,
+    )
+    assert harvested >= 1
+
+    # Verify leads in MongoDB
+    new_count = mongo_db.leads.count_documents({"country": "United Arab Emirates", "lead_type": "importer"})
+    assert new_count > initial_count
+
+    # Check lead document properties
+    lead = mongo_db.leads.find_one({"custom_label": "UAE Realistic Verification Test"})
+    assert lead is not None
+    assert lead["country"] == "United Arab Emirates"
+    assert lead["lead_type"] == "importer"
+    assert lead["website"].startswith("http")
+    assert "@" in lead["emails"]
+    assert "+971" in lead["phones"]
+
+
+

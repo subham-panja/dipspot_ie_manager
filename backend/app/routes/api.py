@@ -1054,6 +1054,43 @@ def get_scrape_status():
     return jsonify({"jobs": [job.to_dict() for job in jobs]})
 
 
+@api_bp.route("/scrape/jobs/<int:job_id>", methods=["GET"])
+def get_scrape_job_detail(job_id: int):
+    """Returns real-time crawler job progress, active stage, and live streaming audit logs."""
+    mongo_db = get_db()
+    c_job = mongo_db.crawler_jobs.find_one({"job_id": job_id})
+    if c_job:
+        c_job["_id"] = str(c_job["_id"])
+        return jsonify({"job": c_job})
+
+    # Fallback to SQLite ScrapeJob
+    sq_job = db.session.get(ScrapeJob, job_id)
+    if sq_job:
+        data = sq_job.to_dict()
+        data["progress_pct"] = 100 if data["status"] == "completed" else (15 if data["status"] == "running" else 0)
+        data["current_step"] = "Completed" if data["status"] == "completed" else "Processing..."
+        data["logs"] = []
+        return jsonify({"job": data})
+
+    return jsonify({"error": "Job not found"}), 404
+
+
+@api_bp.route("/scrape/jobs/live", methods=["GET"])
+def get_live_scrape_job():
+    """Returns the most recent or actively running crawler job for live UI observation."""
+    mongo_db = get_db()
+    # First check for any running job
+    active = mongo_db.crawler_jobs.find_one({"status": "running"}, sort=[("job_id", -1)])
+    if not active:
+        active = mongo_db.crawler_jobs.find_one({}, sort=[("job_id", -1)])
+
+    if active:
+        active["_id"] = str(active["_id"])
+        return jsonify({"job": active})
+
+    return jsonify({"job": None})
+
+
 @api_bp.route("/seed/importers", methods=["POST"])
 def seed_importers_endpoint():
     count = seed_importers(current_app._get_current_object())

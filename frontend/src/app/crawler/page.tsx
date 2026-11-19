@@ -44,8 +44,31 @@ import {
   Square,
   Star,
   Map,
-  Send
+  Send,
+  Terminal,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
+
+interface CrawlerJobLog {
+  timestamp: string;
+  level: string;
+  message: string;
+  url?: string;
+  latency_ms?: number;
+  elapsed_seconds: number;
+}
+
+interface CrawlerJobDetail {
+  job_id: number;
+  progress_pct: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  current_step: string;
+  current_url?: string;
+  leads_found: number;
+  elapsed_seconds: number;
+  logs?: CrawlerJobLog[];
+}
 
 interface HarvestedLead {
   id: number;
@@ -166,6 +189,8 @@ export default function CrawlerLeadGenPage() {
   const [crawlingType, setCrawlingType] = useState<string | null>(null);
   const [crawlMessage, setCrawlMessage] = useState<string | null>(null);
   const [crawlProgress, setCrawlProgress] = useState<number>(0);
+  const [liveCrawlerJob, setLiveCrawlerJob] = useState<CrawlerJobDetail | null>(null);
+  const [showCrawlerLogs, setShowCrawlerLogs] = useState(true);
 
   // Dynamic live count statistics from MongoDB
   const [liveStats, setLiveStats] = useState({
@@ -370,19 +395,13 @@ export default function CrawlerLeadGenPage() {
 
   const runGuidedExtraction = async () => {
     setCrawlingType(targetEntityType);
-    setCrawlProgress(15);
-    setCrawlMessage(`Step 1/3: Initializing ${targetEntityType === 'importer' ? 'Global Importer' : 'Supplier'} Crawler for ${effectiveCountry}...`);
+    setCrawlProgress(8);
+    setCrawlMessage(`Initializing ${targetEntityType === 'importer' ? 'Global Importer' : 'Commercial Supplier'} harvesting pipeline for ${effectiveCountry}...`);
+    setLiveCrawlerJob(null);
 
     try {
       const endpoint = '/scrape/crawl-now';
-
-      setTimeout(() => setCrawlProgress(45), 600);
-      setTimeout(() => {
-        setCrawlProgress(75);
-        setCrawlMessage(`Step 2/3: Querying trade registries & executing 95% ML similarity deduplication...`);
-      }, 1500);
-
-      const res = await fetchJson<{ success?: boolean; message?: string }>(endpoint, {
+      const res = await fetchJson<{ job_id?: number; success?: boolean; message?: string }>(endpoint, {
         method: 'POST',
         body: JSON.stringify({
           lead_type: targetEntityType,
@@ -396,20 +415,52 @@ export default function CrawlerLeadGenPage() {
         }),
       });
 
-      setCrawlProgress(100);
-      setCrawlMessage(res.message || `Extraction complete! Processed ${crawlDepth} verified leads strictly for ${effectiveCountry}.`);
+      const jobId = res.job_id;
+      if (!jobId) {
+        setCrawlProgress(100);
+        setCrawlMessage(res.message || `Extraction initiated.`);
+        setTimeout(() => {
+          loadLeads();
+          loadHistory();
+          setCrawlingType(null);
+        }, 2000);
+        return;
+      }
 
-      setTimeout(() => {
-        loadLeads();
-        loadHistory();
-      }, 2000);
+      // Real-time active polling for genuine crawling progress and live logs
+      const pollTimer = setInterval(async () => {
+        try {
+          const detailRes = await fetchJson<{ job?: CrawlerJobDetail }>(`/scrape/jobs/${jobId}`);
+          if (detailRes.job) {
+            const j = detailRes.job;
+            setLiveCrawlerJob(j);
+            setCrawlProgress(j.progress_pct || 0);
+            setCrawlMessage(j.current_step || 'Crawling trade registries...');
+
+            if (j.status === 'completed' || j.status === 'failed') {
+              clearInterval(pollTimer);
+              loadLeads();
+              loadHistory();
+              if (j.status === 'completed') {
+                setCrawlProgress(100);
+                setCrawlMessage(`Harvesting complete! Processed ${j.leads_found || crawlDepth} verified records strictly for ${effectiveCountry}.`);
+              } else {
+                setCrawlMessage(`Harvest halted: Job marked ${j.status}.`);
+              }
+              // Keep terminal visible, clear crawlingType after inspection window
+              setTimeout(() => {
+                setCrawlingType(null);
+              }, 8000);
+            }
+          }
+        } catch (pollErr) {
+          console.error('Job polling error', pollErr);
+        }
+      }, 750);
+
     } catch (err: any) {
       setCrawlMessage('Crawler error: ' + err.message);
-    } finally {
-      setTimeout(() => {
-        setCrawlingType(null);
-        setCrawlProgress(0);
-      }, 4000);
+      setCrawlingType(null);
     }
   };
 
@@ -1229,18 +1280,113 @@ export default function CrawlerLeadGenPage() {
                     </div>
                   </div>
 
-                  {/* Extraction Progress Animation */}
-                  {crawlingType && (
-                    <div className="space-y-2 p-4 rounded-xl border border-purple-500/30 bg-purple-500/10">
-                      <div className="flex items-center justify-between text-xs font-bold text-purple-300">
-                        <span>{crawlMessage}</span>
-                        <span className="font-mono">{crawlProgress}%</span>
+                  {/* Live Crawler Dashboard & Activity Console */}
+                  {(crawlingType || liveCrawlerJob) && (
+                    <div className="space-y-3 p-4 rounded-xl border border-cyan-500/30 bg-slate-950/90 shadow-2xl backdrop-blur">
+                      {/* Top Metric Bar */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                          </span>
+                          <span className="text-xs font-black text-cyan-400 uppercase tracking-wider">
+                            {liveCrawlerJob?.status === 'completed' ? 'CRAWL COMPLETED' : 'LIVE CRAWLER ACTIVE'}
+                          </span>
+                          <span className="text-slate-600">&bull;</span>
+                          <span className="text-xs text-slate-300 font-medium">{crawlMessage}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs font-mono">
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
+                            <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>{liveCrawlerJob?.elapsed_seconds ? `${liveCrawlerJob.elapsed_seconds}s` : '0.0s'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{liveCrawlerJob?.leads_found || 0} Leads</span>
+                          </div>
+                          <span className="font-bold text-cyan-400 text-sm">{crawlProgress}%</span>
+                        </div>
                       </div>
-                      <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+
+                      {/* Active Progress Bar */}
+                      <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800/80 p-0.5">
                         <div
-                          className="h-full bg-gradient-to-r from-purple-500 to-emerald-400 transition-all duration-500"
+                          className="h-full bg-gradient-to-r from-cyan-500 via-indigo-500 to-emerald-400 rounded-full transition-all duration-500 shadow-sm shadow-cyan-500/50"
                           style={{ width: `${crawlProgress}%` }}
                         />
+                      </div>
+
+                      {/* Live Target URL Pill */}
+                      {liveCrawlerJob?.current_url && (
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 font-mono truncate">
+                          <Globe className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span className="text-slate-500">Target:</span>
+                          <span className="text-indigo-300 truncate">{liveCrawlerJob.current_url}</span>
+                        </div>
+                      )}
+
+                      {/* Live Terminal Log Stream */}
+                      <div className="rounded-xl border border-slate-800 bg-black/95 overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-slate-900/90 border-b border-slate-800/80 text-[11px]">
+                          <div className="flex items-center gap-2">
+                            <div className="flex gap-1.5">
+                              <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
+                              <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+                              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+                            </div>
+                            <Terminal className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
+                            <span className="text-slate-300 font-mono font-bold">
+                              Live Crawler Terminal {liveCrawlerJob?.job_id ? `(Job #${liveCrawlerJob.job_id})` : ''}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowCrawlerLogs((prev) => !prev)}
+                            className="text-slate-400 hover:text-white flex items-center gap-1 text-[10px] font-mono"
+                          >
+                            <span>{showCrawlerLogs ? 'Collapse' : 'Expand'}</span>
+                            {showCrawlerLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          </button>
+                        </div>
+
+                        {showCrawlerLogs && (
+                          <div className="p-3 max-h-48 overflow-y-auto space-y-1.5 font-mono text-[11px] text-slate-300">
+                            {(!liveCrawlerJob?.logs || liveCrawlerJob.logs.length === 0) ? (
+                              <div className="text-slate-500 italic flex items-center gap-2 py-2">
+                                <Radio className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
+                                <span>Establishing session handshake with verified registries...</span>
+                              </div>
+                            ) : (
+                              liveCrawlerJob.logs.map((lg, lIdx) => {
+                                let badgeColor = 'bg-slate-800 text-slate-300 border-slate-700';
+                                if (lg.level === 'HTTP') badgeColor = 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60';
+                                if (lg.level === 'ROBOTS') badgeColor = 'bg-cyan-950/80 text-cyan-300 border-cyan-800/60';
+                                if (lg.level === 'PARSE') badgeColor = 'bg-blue-950/80 text-blue-300 border-blue-800/60';
+                                if (lg.level === 'DEDUP') badgeColor = 'bg-purple-950/80 text-purple-300 border-purple-800/60';
+                                if (lg.level === 'WARN') badgeColor = 'bg-amber-950/80 text-amber-300 border-amber-800/60';
+                                if (lg.level === 'SUCCESS') badgeColor = 'bg-emerald-900 text-emerald-200 border-emerald-700';
+
+                                return (
+                                  <div key={lIdx} className="flex items-start gap-2 leading-relaxed hover:bg-slate-900/60 p-0.5 rounded">
+                                    <span className="text-slate-600 shrink-0 text-[10px]">
+                                      {lg.timestamp ? lg.timestamp.slice(11, 19) : ''}
+                                    </span>
+                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border shrink-0 ${badgeColor}`}>
+                                      {lg.level}
+                                    </span>
+                                    <span className="text-slate-200 flex-1 break-all">
+                                      {lg.message}
+                                      {lg.latency_ms ? (
+                                        <span className="text-slate-500 text-[10px] ml-1.5">({lg.latency_ms}ms)</span>
+                                      ) : null}
+                                    </span>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
