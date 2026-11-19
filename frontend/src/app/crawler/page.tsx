@@ -39,7 +39,12 @@ import {
   Check,
   Trash2,
   Edit,
-  RefreshCw
+  RefreshCw,
+  CheckSquare,
+  Square,
+  Star,
+  Map,
+  Send
 } from 'lucide-react';
 
 interface HarvestedLead {
@@ -78,6 +83,29 @@ interface TradeSource {
   reliability_score: number;
   lead_type: 'importer' | 'supplier';
   is_indian?: boolean;
+  is_map_extractor?: boolean;
+  enabled?: boolean;
+}
+
+interface MapPlaceResult {
+  place_id: string;
+  company_name: string;
+  formatted_address: string;
+  city: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  google_rating: number;
+  user_ratings_total: number;
+  phones: string;
+  emails: string;
+  website: string;
+  google_maps_url: string;
+  business_type: string;
+  opening_hours: string;
+  lead_type: string;
+  matched_varieties?: string;
+  priority_score?: number;
 }
 
 interface ExtractionRecord {
@@ -106,16 +134,33 @@ export default function CrawlerLeadGenPage() {
   const { theme, accentClasses, openSettings } = useTheme();
   const isLight = theme === 'light';
 
-  // Sub-views: 'wizard' | 'importers' | 'suppliers' | 'sources' | 'history'
-  const [activeTab, setActiveTab] = useState<'wizard' | 'importers' | 'suppliers' | 'sources' | 'history'>('wizard');
+  // Sub-views: 'wizard' | 'gmaps' | 'importers' | 'suppliers' | 'sources' | 'history'
+  const [activeTab, setActiveTab] = useState<'wizard' | 'gmaps' | 'importers' | 'suppliers' | 'sources' | 'history'>('wizard');
 
   const [harvestedLeads, setHarvestedLeads] = useState<HarvestedLead[]>([]);
   const [tradeSources, setTradeSources] = useState<TradeSource[]>([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(new Set());
+  const [step3Search, setStep3Search] = useState('');
   const [extractionHistory, setExtractionHistory] = useState<ExtractionRecord[]>([]);
   const [loadingSources, setLoadingSources] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [sourcesFilter, setSourcesFilter] = useState<'all' | 'importer' | 'supplier' | 'indian'>('all');
+  const [sourcesFilter, setSourcesFilter] = useState<'all' | 'importer' | 'supplier' | 'indian' | 'map'>('all');
   const [sourceSearch, setSourceSearch] = useState('');
+
+  // Google Maps Live Extractor State
+  const [mapSearchQuery, setMapSearchQuery] = useState('Rice Importers in Dubai');
+  const [mapSearchCountry, setMapSearchCountry] = useState('United Arab Emirates');
+  const [mapSearchCity, setMapSearchCity] = useState('Dubai');
+  const [mapSearchType, setMapSearchType] = useState<'importer' | 'supplier'>('importer');
+  const [mapSearchRadius, setMapSearchRadius] = useState<number>(50);
+  const [mapSearchLimit, setMapSearchLimit] = useState<number>(20);
+  const [mapSearchResults, setMapSearchResults] = useState<MapPlaceResult[]>([]);
+  const [selectedPlaceIds, setSelectedPlaceIds] = useState<Set<string>>(new Set());
+  const [searchingMap, setSearchingMap] = useState(false);
+  const [extractingMap, setExtractingMap] = useState(false);
+  const [mapCustomLabel, setMapCustomLabel] = useState('GoogleMaps-Dubai-Outreach');
+  const [mapExtractionNotes, setMapExtractionNotes] = useState('Targeting commercial importers identified on Google Maps');
+  const [mapExtractToast, setMapExtractToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [crawlingType, setCrawlingType] = useState<string | null>(null);
@@ -189,11 +234,107 @@ export default function CrawlerLeadGenPage() {
     try {
       setLoadingSources(true);
       const res = await fetchJson<{ sources: TradeSource[] }>('/crawler/sources');
-      setTradeSources(res.sources || []);
+      const all = res.sources || [];
+      setTradeSources(all);
+      // BY DEFAULT ON CRAWLER: ALL AVAILABLE (ENABLED) SOURCES ARE SELECTED!
+      const enabled = all.filter((s) => s.enabled !== false);
+      setSelectedSourceIds(new Set(enabled.map((s) => s.id)));
     } catch (e) {
       console.error('Failed to load trade sources registry', e);
     } finally {
       setLoadingSources(false);
+    }
+  };
+
+  const toggleSourceSelection = (sourceId: string) => {
+    setSelectedSourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sourceId)) {
+        next.delete(sourceId); // User can DESELECT any source
+      } else {
+        next.add(sourceId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllSources = () => {
+    const enabled = tradeSources.filter((s) => s.enabled !== false);
+    setSelectedSourceIds(new Set(enabled.map((s) => s.id)));
+  };
+
+  const deselectAllSources = () => {
+    setSelectedSourceIds(new Set());
+  };
+
+  const selectIndianSourcesOnly = () => {
+    const ind = tradeSources.filter(
+      (s) => (s.is_indian || s.country_coverage?.toLowerCase().includes('india')) && s.enabled !== false
+    );
+    setSelectedSourceIds(new Set(ind.map((s) => s.id)));
+  };
+
+  const selectMapExtractorOnly = () => {
+    const maps = tradeSources.filter(
+      (s) => (s.is_map_extractor || s.id.includes('gmaps')) && s.enabled !== false
+    );
+    setSelectedSourceIds(new Set(maps.map((s) => s.id)));
+  };
+
+  const handleMapSearch = async () => {
+    if (!mapSearchQuery.trim()) return;
+    try {
+      setSearchingMap(true);
+      setMapExtractToast(null);
+      const res = await fetchJson<{ places: MapPlaceResult[]; total_found: number }>('/crawler/map-search', {
+        method: 'POST',
+        body: JSON.stringify({
+          query: mapSearchQuery,
+          country: mapSearchCountry || undefined,
+          city: mapSearchCity || undefined,
+          radius_km: mapSearchRadius,
+          limit: mapSearchLimit,
+          lead_type: mapSearchType,
+        }),
+      });
+      const places = res.places || [];
+      setMapSearchResults(places);
+      setSelectedPlaceIds(new Set(places.map((p) => p.place_id)));
+    } catch (err: any) {
+      setMapExtractToast({ text: err.message || 'Failed to search Google Maps', type: 'error' });
+    } finally {
+      setSearchingMap(false);
+    }
+  };
+
+  const handleMapExtract = async () => {
+    const toExtract = mapSearchResults.filter((p) => selectedPlaceIds.has(p.place_id));
+    if (toExtract.length === 0) {
+      alert('Please select at least one Google Maps place to extract.');
+      return;
+    }
+    try {
+      setExtractingMap(true);
+      setMapExtractToast(null);
+      const res = await fetchJson<{ message: string; records_saved: number }>('/crawler/map-extract', {
+        method: 'POST',
+        body: JSON.stringify({
+          places: toExtract,
+          custom_label: mapCustomLabel.trim() || 'Google Maps Extraction',
+          extraction_notes: mapExtractionNotes.trim() || undefined,
+          lead_type: mapSearchType,
+        }),
+      });
+      setMapExtractToast({
+        text: `Extracted ${toExtract.length} places from Google Maps into database (${res.records_saved} records saved)!`,
+        type: 'success',
+      });
+      loadLeads();
+      loadHistory();
+    } catch (err: any) {
+      setMapExtractToast({ text: err.message || 'Failed to extract places', type: 'error' });
+    } finally {
+      setExtractingMap(false);
     }
   };
 
@@ -210,9 +351,14 @@ export default function CrawlerLeadGenPage() {
   };
 
   useEffect(() => {
+    loadLeads();
+    loadSources();
+  }, []);
+
+  useEffect(() => {
     if (activeTab === 'sources') loadSources();
     else if (activeTab === 'history') loadHistory();
-    else loadLeads();
+    else if (activeTab === 'importers' || activeTab === 'suppliers') loadLeads();
   }, [activeTab]);
 
   const effectiveCountry = useMemo(() => {
@@ -246,6 +392,7 @@ export default function CrawlerLeadGenPage() {
           custom_city: customCityInput.trim() || undefined,
           custom_label: customLabel.trim() || 'Standard Harvest',
           extraction_notes: extractionNotes.trim() || undefined,
+          selected_sources: Array.from(selectedSourceIds),
         }),
       });
 
@@ -322,13 +469,35 @@ export default function CrawlerLeadGenPage() {
       if (sourcesFilter === 'importer' && s.lead_type !== 'importer') return false;
       if (sourcesFilter === 'supplier' && s.lead_type !== 'supplier') return false;
       if (sourcesFilter === 'indian' && !s.is_indian && !s.country_coverage.toLowerCase().includes('india')) return false;
+      if (sourcesFilter === 'map' && !s.is_map_extractor && !s.id.includes('gmaps')) return false;
       if (sourceSearch.trim()) {
         const q = sourceSearch.toLowerCase();
-        return s.name.toLowerCase().includes(q) || s.category.toLowerCase().includes(q) || s.country_coverage.toLowerCase().includes(q);
+        return (
+          s.name.toLowerCase().includes(q) ||
+          s.category.toLowerCase().includes(q) ||
+          s.country_coverage.toLowerCase().includes(q) ||
+          s.domain.toLowerCase().includes(q)
+        );
       }
       return true;
     });
   }, [tradeSources, sourcesFilter, sourceSearch]);
+
+  const availableStep3Sources = useMemo(() => {
+    return tradeSources.filter((s) => {
+      if (s.lead_type !== targetEntityType) return false;
+      if (step3Search.trim()) {
+        const q = step3Search.toLowerCase();
+        return (
+          s.name.toLowerCase().includes(q) ||
+          s.category.toLowerCase().includes(q) ||
+          s.country_coverage.toLowerCase().includes(q) ||
+          s.domain.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [tradeSources, targetEntityType, step3Search]);
 
   const navItems: PageSubNavItem[] = [
     {
@@ -339,6 +508,15 @@ export default function CrawlerLeadGenPage() {
       onClick: () => setActiveTab('wizard'),
       active: activeTab === 'wizard',
       desc: 'Pipeline lead generation',
+    },
+    {
+      id: 'gmaps',
+      label: 'Google Maps Live Extractor',
+      icon: <MapPin className="w-4 h-4 text-emerald-400" />,
+      badge: 'Live Map Search',
+      onClick: () => setActiveTab('gmaps'),
+      active: activeTab === 'gmaps',
+      desc: 'Live places & ratings harvest',
     },
     {
       id: 'importers',
@@ -371,10 +549,10 @@ export default function CrawlerLeadGenPage() {
       id: 'sources',
       label: 'Trade Sources Registry',
       icon: <Database className="w-4 h-4 text-cyan-400" />,
-      badge: '216 Sources',
+      badge: `${tradeSources.length || 218} Sources`,
       onClick: () => setActiveTab('sources'),
       active: activeTab === 'sources',
-      desc: '108 Buyer & 108 Mill registries',
+      desc: '109 Buyer & 109 Mill registries',
     },
   ];
 
@@ -727,41 +905,188 @@ export default function CrawlerLeadGenPage() {
                 </div>
               )}
 
-              {/* Step 3: Trade Sources & Indian Focus */}
+              {/* Step 3: Trade Sources & Google Maps Selection */}
               {wizardStep === 3 && (
                 <div
                   className={`p-6 rounded-2xl border space-y-6 ${
                     isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
                   }`}
                 >
-                  <div>
-                    <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                      Step 3: Verified Trade Registries & Sourcing Engines
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Target over 216 verified trade sources (108 Importers and 108 Suppliers), with dedicated focus on Indian export bodies.
-                    </p>
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                        Step 3: Verified Trade Registries & Live Map Extractor Selection
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        By default, all {availableStep3Sources.length} available sourcing channels are selected.
+                        You can deselect any source or select specific channels below.
+                      </p>
+                    </div>
+
+                    {/* Master Selection Toolbar */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-mono px-3 py-1 rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-300 font-bold">
+                        {selectedSourceIds.size} of {availableStep3Sources.length} Selected
+                      </span>
+                      <button
+                        type="button"
+                        onClick={selectAllSources}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition flex items-center gap-1"
+                      >
+                        <CheckSquare className="w-3.5 h-3.5" />
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={deselectAllSources}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition flex items-center gap-1"
+                      >
+                        <Square className="w-3.5 h-3.5" />
+                        Deselect All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={selectIndianSourcesOnly}
+                        className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-xs font-bold transition"
+                      >
+                        Indian Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={selectMapExtractorOnly}
+                        className="px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 text-xs font-bold transition flex items-center gap-1"
+                      >
+                        <MapPin className="w-3 h-3" />
+                        Google Maps Only
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Highlights Card */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 rounded-xl border border-blue-500/20 bg-blue-500/5">
-                      <span className="text-[10px] font-mono text-blue-400 uppercase font-bold">108 Buyer Registries</span>
-                      <p className="text-xs font-semibold text-white mt-1">UN Comtrade, Panjiva, Port Customs</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Customs manifest bills of lading across 35+ countries.</p>
+                  {/* Featured Card: Google Maps Live Extractor */}
+                  <div className="p-4 rounded-xl border border-purple-500/40 bg-purple-500/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-300 mt-0.5">
+                        <MapPin className="w-5 h-5 text-purple-400" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-white">Google Maps Live Geospatial Extractor</h4>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold">
+                            Live Places
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold flex items-center gap-1">
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                            ★ 4.8 Rating
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 mt-0.5">
+                          Directly queries Google Maps to extract active trading firms, processing mills, GPS coordinates,
+                          opening hours, verified phone numbers, and customer review metrics.
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
-                      <span className="text-[10px] font-mono text-emerald-400 uppercase font-bold">77 Indian Export Bodies</span>
-                      <p className="text-xs font-semibold text-white mt-1">APEDA, FIEO, EEPC, AIREA, Rice Millers</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Primary Indian producers, state agro boards, and verified mills.</p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const gmapsId = targetEntityType === 'importer' ? 'imp-src-gmaps' : 'sup-src-gmaps';
+                        toggleSourceSelection(gmapsId);
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+                        selectedSourceIds.has(targetEntityType === 'importer' ? 'imp-src-gmaps' : 'sup-src-gmaps')
+                          ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-md'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {selectedSourceIds.has(targetEntityType === 'importer' ? 'imp-src-gmaps' : 'sup-src-gmaps') ? (
+                        <>
+                          <Check className="w-4 h-4" />
+                          <span>Included in Harvest</span>
+                        </>
+                      ) : (
+                        <span>Click to Include</span>
+                      )}
+                    </button>
+                  </div>
 
-                    <div className="p-4 rounded-xl border border-purple-500/20 bg-purple-500/5">
-                      <span className="text-[10px] font-mono text-purple-400 uppercase font-bold">Multi-Factor ML Merge</span>
-                      <p className="text-xs font-semibold text-white mt-1">95% Deduplication Engine</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Auto-merges duplicate contacts, enriching phone and email trails.</p>
+                  {/* Search within Step 3 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold text-slate-400">
+                      Channel Selection ({availableStep3Sources.length} Sourcing Registries)
+                    </span>
+                    <div className="relative min-w-[240px]">
+                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={step3Search}
+                        onChange={(e) => setStep3Search(e.target.value)}
+                        placeholder="Filter registries in Step 3..."
+                        className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs bg-slate-950 border border-slate-800 text-white placeholder-slate-500 outline-none"
+                      />
                     </div>
+                  </div>
+
+                  {/* Scrollable Sources Grid with Checkboxes */}
+                  <div className="max-h-[340px] overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/40 p-2 divide-y divide-slate-800/40">
+                    {availableStep3Sources.map((source) => {
+                      const isSelected = selectedSourceIds.has(source.id);
+                      const isGmaps = source.is_map_extractor || source.id.includes('gmaps');
+                      const isDisabledGlobal = source.enabled === false;
+
+                      return (
+                        <div
+                          key={source.id}
+                          className={`p-2.5 flex items-center justify-between gap-3 transition rounded-lg ${
+                            isSelected ? 'bg-purple-500/5' : 'hover:bg-slate-900/50'
+                          } ${isDisabledGlobal ? 'opacity-50' : ''}`}
+                        >
+                          <label className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={isDisabledGlobal}
+                              onChange={() => toggleSourceSelection(source.id)}
+                              className="mt-0.5 accent-purple-500 w-4 h-4 rounded cursor-pointer shrink-0"
+                            />
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-white truncate">{source.name}</span>
+                                {isGmaps && (
+                                  <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold">
+                                    Google Maps
+                                  </span>
+                                )}
+                                {source.is_indian && (
+                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-orange-500/20 text-orange-300 font-bold">
+                                    Indian Body
+                                  </span>
+                                )}
+                                {isDisabledGlobal && (
+                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-bold">
+                                    Disabled in Settings
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                                <span>{source.category}</span>
+                                <span>•</span>
+                                <span>Coverage: {source.country_coverage}</span>
+                                <span>•</span>
+                                <span className="font-mono text-emerald-400 font-bold">{source.reliability_score}%</span>
+                              </div>
+                            </div>
+                          </label>
+
+                          <span
+                            className={`text-[10px] font-mono font-bold uppercase shrink-0 ${
+                              isSelected ? 'text-emerald-400' : 'text-slate-500'
+                            }`}
+                          >
+                            {isSelected ? 'SELECTED' : 'DESELECTED'}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Indian Supplier Priority Toggle */}
@@ -895,6 +1220,13 @@ export default function CrawlerLeadGenPage() {
                       <span className="text-slate-400">Custom Audit Label:</span>
                       <span className="font-bold text-purple-400 font-mono">{customLabel}</span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Selected Channels:</span>
+                      <span className="font-bold text-cyan-400 font-mono">
+                        {selectedSourceIds.size} Registries
+                        {selectedSourceIds.has(targetEntityType === 'importer' ? 'imp-src-gmaps' : 'sup-src-gmaps') ? ' (+ Google Maps Live)' : ''}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Extraction Progress Animation */}
@@ -928,6 +1260,352 @@ export default function CrawlerLeadGenPage() {
                       <Play className="w-4 h-4 fill-white" />
                       <span>{crawlingType ? 'Extracting Leads...' : `Launch Extraction (${crawlDepth} Leads)`}</span>
                     </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: GOOGLE MAPS LIVE PLACE EXTRACTOR */}
+          {activeTab === 'gmaps' && (
+            <div
+              className={`p-6 rounded-2xl border space-y-6 ${
+                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900 border-slate-800'
+              }`}
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-2 rounded-xl bg-purple-500/20 text-purple-400">
+                    <MapPin className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h2 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Google Maps Geospatial Place Extractor
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Search active commercial importers, grain elevators, and millers live on Google Maps. Inspect coordinates,
+                      ratings, reviews, and extract verified places into the database with ML deduplication.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Toast Feedback */}
+              {mapExtractToast && (
+                <div
+                  className={`p-3.5 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    mapExtractToast.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{mapExtractToast.text}</span>
+                </div>
+              )}
+
+              {/* Search Box & Controls */}
+              <div className="p-5 rounded-xl border border-slate-800 bg-slate-950/70 space-y-4">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-purple-400 absolute left-3.5 top-3.5" />
+                    <input
+                      type="text"
+                      value={mapSearchQuery}
+                      onChange={(e) => setMapSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleMapSearch();
+                      }}
+                      placeholder="e.g. Rice Importers in Dubai, Agro Millers in Burdwan, Spices in Kochi..."
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl text-xs bg-slate-900 border border-slate-700 text-white placeholder-slate-500 outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleMapSearch}
+                    disabled={searchingMap || !mapSearchQuery.trim()}
+                    className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center justify-center gap-2 shrink-0 ${accentClasses.btn}`}
+                  >
+                    {searchingMap ? <RotateCw className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
+                    <span>{searchingMap ? 'Searching Maps...' : 'Search Google Maps'}</span>
+                  </button>
+                </div>
+
+                {/* Preset Search Pills */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none text-[11px]">
+                  <span className="text-slate-500 shrink-0 font-medium">Quick Queries:</span>
+                  {[
+                    { label: 'Dubai Basmati Importers', query: 'Basmati Rice Importers in Dubai', country: 'United Arab Emirates', city: 'Dubai', type: 'importer' },
+                    { label: 'Burdwan Rice Millers', query: 'Rice Processing Mills in Burdwan', country: 'India', city: 'Burdwan', type: 'supplier' },
+                    { label: 'Kochi Spices Exporters', query: 'Spices Exporters in Kochi', country: 'India', city: 'Kochi', type: 'supplier' },
+                    { label: 'Jeddah Food Wholesalers', query: 'Grain & Food Importers in Jeddah', country: 'Saudi Arabia', city: 'Jeddah', type: 'importer' },
+                    { label: 'Houston Grain Elevators', query: 'Bulk Grain Elevators in Houston', country: 'United States', city: 'Houston', type: 'supplier' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        setMapSearchQuery(preset.query);
+                        setMapSearchCountry(preset.country);
+                        setMapSearchCity(preset.city);
+                        setMapSearchType(preset.type as any);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition whitespace-nowrap"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Settings Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-slate-800/60">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Entity Type</label>
+                    <select
+                      value={mapSearchType}
+                      onChange={(e) => setMapSearchType(e.target.value as any)}
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-white px-2.5 py-2 rounded-xl outline-none"
+                    >
+                      <option value="importer">Importer / Wholesale Buyer</option>
+                      <option value="supplier">Supplier / Agro Processing Mill</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Target Country</label>
+                    <input
+                      type="text"
+                      value={mapSearchCountry}
+                      onChange={(e) => setMapSearchCountry(e.target.value)}
+                      placeholder="e.g. United Arab Emirates"
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-white px-2.5 py-2 rounded-xl outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Target City / Hub</label>
+                    <input
+                      type="text"
+                      value={mapSearchCity}
+                      onChange={(e) => setMapSearchCity(e.target.value)}
+                      placeholder="e.g. Dubai"
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-white px-2.5 py-2 rounded-xl outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">Search Radius</label>
+                    <select
+                      value={mapSearchRadius}
+                      onChange={(e) => setMapSearchRadius(Number(e.target.value))}
+                      className="w-full bg-slate-900 border border-slate-800 text-xs text-white px-2.5 py-2 rounded-xl outline-none"
+                    >
+                      <option value={10}>10 km Radius</option>
+                      <option value={25}>25 km Radius</option>
+                      <option value={50}>50 km Radius</option>
+                      <option value={100}>100 km Radius</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Search Results Area */}
+              {mapSearchResults.length === 0 && !searchingMap && (
+                <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-950/30">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto mb-3">
+                    <MapPin className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-white">No Map Search Executed Yet</h4>
+                  <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                    Type a query above (or click one of the quick queries) to search live Google Maps commercial entities
+                    and preview their reviews, ratings, and coordinates.
+                  </p>
+                </div>
+              )}
+
+              {searchingMap && (
+                <div className="p-12 text-center border border-slate-800 rounded-2xl bg-slate-950/30 space-y-3">
+                  <RotateCw className="w-8 h-8 text-purple-400 animate-spin mx-auto" />
+                  <p className="text-xs font-semibold text-purple-300">
+                    Querying Google Maps Places and synthesizing verified coordinates...
+                  </p>
+                </div>
+              )}
+
+              {mapSearchResults.length > 0 && !searchingMap && (
+                <div className="space-y-4">
+                  {/* Results Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-white">
+                        Found {mapSearchResults.length} Google Maps Places
+                      </span>
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold">
+                        {selectedPlaceIds.size} of {mapSearchResults.length} Selected
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPlaceIds(new Set(mapSearchResults.map((p) => p.place_id)))}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 transition"
+                      >
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPlaceIds(new Set())}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 transition"
+                      >
+                        <Square className="w-3.5 h-3.5 text-slate-500" />
+                        Deselect All
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Places Cards Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {mapSearchResults.map((place) => {
+                      const isChecked = selectedPlaceIds.has(place.place_id);
+                      return (
+                        <div
+                          key={place.place_id}
+                          className={`p-4 rounded-xl border transition space-y-3 ${
+                            isChecked
+                              ? 'bg-purple-500/5 border-purple-500/40 shadow-sm'
+                              : 'bg-slate-950/60 border-slate-800 opacity-75 hover:opacity-100'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <label className="flex items-start gap-2.5 cursor-pointer flex-1 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setSelectedPlaceIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(place.place_id)) next.delete(place.place_id);
+                                    else next.add(place.place_id);
+                                    return next;
+                                  });
+                                }}
+                                className="mt-0.5 accent-purple-500 w-4 h-4 rounded cursor-pointer shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <h4 className="text-xs font-bold text-white hover:text-purple-300 transition truncate">
+                                  {place.company_name}
+                                </h4>
+                                <span className="text-[10px] text-slate-400 block truncate">{place.formatted_address}</span>
+                              </div>
+                            </label>
+
+                            <a
+                              href={place.google_maps_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-slate-400 hover:text-purple-400 transition shrink-0"
+                              title="Open on Google Maps"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                            <span className="font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold flex items-center gap-1">
+                              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                              {place.google_rating} ({place.user_ratings_total} reviews)
+                            </span>
+                            <span className="font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                              {place.business_type}
+                            </span>
+                            <span className="font-mono text-purple-400 text-[10px]">
+                              {place.latitude}, {place.longitude}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] text-slate-400 space-y-1 pt-1 border-t border-slate-800/40">
+                            <div className="flex justify-between">
+                              <span>Phone:</span>
+                              <span className="font-mono text-slate-200">{place.phones}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Email:</span>
+                              <span className="font-mono text-slate-300 truncate max-w-[220px]">{place.emails}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Website:</span>
+                              <span className="font-mono text-blue-400 truncate max-w-[220px]">{place.website}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Extraction Execution Box */}
+                  <div className="p-5 rounded-2xl border border-purple-500/30 bg-purple-950/20 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-purple-400" />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Batch Extraction into Database with ML Deduplication
+                      </h4>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+                          <Tag className="w-3.5 h-3.5 text-purple-400" />
+                          Custom Audit Campaign Label
+                        </label>
+                        <input
+                          type="text"
+                          value={mapCustomLabel}
+                          onChange={(e) => setMapCustomLabel(e.target.value)}
+                          placeholder="e.g. GoogleMaps-Dubai-Rice-Q1"
+                          className="w-full bg-slate-950 border border-purple-500/50 text-xs font-mono text-white px-3 py-2 rounded-xl outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                          Extraction Purpose Notes
+                        </label>
+                        <input
+                          type="text"
+                          value={mapExtractionNotes}
+                          onChange={(e) => setMapExtractionNotes(e.target.value)}
+                          placeholder="e.g. High-rated trading companies extracted from Dubai commercial map search"
+                          className="w-full bg-slate-950 border border-slate-800 text-xs text-white px-3 py-2 rounded-xl outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-xs text-slate-400">
+                        {selectedPlaceIds.size} places will be processed through the 95% ML merge engine.
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={handleMapExtract}
+                        disabled={extractingMap || selectedPlaceIds.size === 0}
+                        className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-2 shadow-lg shadow-purple-500/20 ${accentClasses.btn}`}
+                      >
+                        {extractingMap ? (
+                          <RotateCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Send className="w-4 h-4" />
+                        )}
+                        <span>
+                          {extractingMap
+                            ? 'Extracting Places...'
+                            : `Extract ${selectedPlaceIds.size} Places into Database`}
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1169,7 +1847,7 @@ export default function CrawlerLeadGenPage() {
             </div>
           )}
 
-          {/* TAB 5: 216 TRADE SOURCES REGISTRY */}
+          {/* TAB 5: 218 TRADE SOURCES REGISTRY */}
           {activeTab === 'sources' && (
             <div
               className={`p-6 rounded-2xl border space-y-6 ${
@@ -1179,19 +1857,20 @@ export default function CrawlerLeadGenPage() {
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
                   <h3 className={`text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                    Verified Trade Sources Registry (216 Portals & Promotion Councils)
+                    Verified Trade Sources & Geospatial Registries (218 Channels)
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    108 Verified Global Importer Registries and 108 Supplier Registries, with 77 Indian Export Promotion Councils & Boards.
+                    109 Global Importer Registries (including Google Maps Live Extractor) and 109 Supplier Registries, with 77 Indian Export Promotion Councils & Boards.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {[
-                    { id: 'all', label: 'All 216 Sources' },
-                    { id: 'importer', label: 'Importers (108)' },
-                    { id: 'supplier', label: 'Suppliers (108)' },
+                    { id: 'all', label: `All (${tradeSources.length || 218})` },
+                    { id: 'importer', label: `Importers (${tradeSources.filter((s) => s.lead_type === 'importer').length || 109})` },
+                    { id: 'supplier', label: `Suppliers (${tradeSources.filter((s) => s.lead_type === 'supplier').length || 109})` },
                     { id: 'indian', label: 'Indian Councils (77)' },
+                    { id: 'map', label: 'Google Maps (2)' },
                   ].map((f) => (
                     <button
                       key={f.id}
@@ -1212,7 +1891,7 @@ export default function CrawlerLeadGenPage() {
               <div className="max-w-md">
                 <input
                   type="text"
-                  placeholder="Search 216 sources by name, category, or country..."
+                  placeholder="Search 218 sources by name, category, or country..."
                   value={sourceSearch}
                   onChange={(e) => setSourceSearch(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl text-xs bg-slate-950 border border-slate-800 text-white outline-none focus:border-amber-500"
@@ -1221,38 +1900,49 @@ export default function CrawlerLeadGenPage() {
 
               {/* Sources Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {filteredSources.map((src) => (
-                  <div
-                    key={src.id}
-                    className="p-4 rounded-xl border border-slate-800 bg-slate-950/80 hover:border-slate-700 transition flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
-                          {src.category}
-                        </span>
-                        <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded">
-                          {src.reliability_score}% Reliable
-                        </span>
+                {filteredSources.map((src) => {
+                  const isGmaps = src.is_map_extractor || src.id.includes('gmaps');
+                  return (
+                    <div
+                      key={src.id}
+                      className="p-4 rounded-xl border border-slate-800 bg-slate-950/80 hover:border-slate-700 transition flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
+                            {src.category}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded">
+                            {src.reliability_score}% Reliable
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-2">
+                          {isGmaps && <MapPin className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                          <h4 className="text-xs font-bold text-white leading-tight">{src.name}</h4>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">Coverage: {src.country_coverage}</p>
+                        {src.enabled === false && (
+                          <span className="text-[10px] font-mono text-rose-400 font-bold block mt-1">
+                            (Disabled in Settings)
+                          </span>
+                        )}
                       </div>
-                      <h4 className="text-xs font-bold text-white mt-2 leading-tight">{src.name}</h4>
-                      <p className="text-[11px] text-slate-400 mt-1">Coverage: {src.country_coverage}</p>
-                    </div>
 
-                    <div className="pt-3 mt-3 border-t border-slate-800/60 flex items-center justify-between">
-                      <span className="text-[10px] font-mono uppercase text-slate-500">{src.lead_type}</span>
-                      <a
-                        href={src.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-amber-400 hover:underline flex items-center gap-1 font-semibold"
-                      >
-                        <span>Visit Registry</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      <div className="pt-3 mt-3 border-t border-slate-800/60 flex items-center justify-between">
+                        <span className="text-[10px] font-mono uppercase text-slate-500">{src.lead_type}</span>
+                        <a
+                          href={src.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-amber-400 hover:underline flex items-center gap-1 font-semibold"
+                        >
+                          <span>Visit Registry</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

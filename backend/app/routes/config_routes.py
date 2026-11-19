@@ -310,3 +310,78 @@ def update_dedup_config():
     current["updated_at"] = now_iso()
     db.system_config.update_one({"_id": "singleton_config"}, {"$set": {"dedup": current}}, upsert=True)
     return jsonify({"dedup": current, "message": "ML Deduplication parameters updated successfully"})
+
+
+@config_bp.route("/sources", methods=["GET"])
+def get_sources_config():
+    """Returns all verified trade sources with active/disabled statuses."""
+    db = get_db()
+    conf = db.system_config.find_one({"_id": "singleton_config"}) or {}
+    disabled_ids = conf.get("disabled_sources") or []
+    from app.sources import IMPORTER_SOURCES, SUPPLIER_SOURCES
+
+    all_sources = []
+    for s in IMPORTER_SOURCES + SUPPLIER_SOURCES:
+        item = dict(s)
+        item["enabled"] = item["id"] not in disabled_ids
+        all_sources.append(item)
+
+    return jsonify({
+        "total": len(all_sources),
+        "enabled_count": len([s for s in all_sources if s["enabled"]]),
+        "disabled_count": len(disabled_ids),
+        "disabled_sources": disabled_ids,
+        "sources": all_sources,
+    })
+
+
+@config_bp.route("/sources", methods=["PATCH", "PUT"])
+def update_sources_config():
+    """Enables or disables lead generation sources globally."""
+    db = get_db()
+    data = request.get_json() or {}
+    conf = db.system_config.find_one({"_id": "singleton_config"}) or {}
+    current_disabled = set(conf.get("disabled_sources") or [])
+    from app.sources import IMPORTER_SOURCES, SUPPLIER_SOURCES
+    all_ids = {s["id"] for s in IMPORTER_SOURCES + SUPPLIER_SOURCES}
+
+    action = data.get("action")
+    if action == "enable_all":
+        current_disabled = set()
+    elif action == "disable_all":
+        current_disabled = set(all_ids)
+    elif action == "enable_indian_only":
+        current_disabled = set()
+        for s in IMPORTER_SOURCES + SUPPLIER_SOURCES:
+            if not (s.get("is_indian") or "india" in s.get("country_coverage", "").lower()):
+                current_disabled.add(s["id"])
+    elif "disabled_source_ids" in data:
+        current_disabled = set(data["disabled_source_ids"])
+    elif "toggle" in data:
+        t = data["toggle"]
+        sid = t.get("source_id")
+        en = t.get("enabled")
+        if sid:
+            if en:
+                current_disabled.discard(sid)
+            else:
+                current_disabled.add(sid)
+    elif "sources_status" in data:
+        for sid, en in data["sources_status"].items():
+            if en:
+                current_disabled.discard(sid)
+            else:
+                current_disabled.add(sid)
+
+    disabled_list = sorted(list(current_disabled))
+    db.system_config.update_one(
+        {"_id": "singleton_config"},
+        {"$set": {"disabled_sources": disabled_list, "updated_at": now_iso()}},
+        upsert=True
+    )
+    return jsonify({
+        "message": "Data sources configuration updated successfully",
+        "disabled_sources": disabled_list,
+        "disabled_count": len(disabled_list),
+        "enabled_count": len(all_ids) - len(disabled_list),
+    })

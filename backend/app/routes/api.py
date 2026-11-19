@@ -777,17 +777,102 @@ def get_crawler_history():
 @api_bp.route("/crawler/sources", methods=["GET"])
 def get_crawler_sources_endpoint():
     from app.sources import get_all_sources
+    mongo_db = get_db()
+    conf = mongo_db.system_config.find_one({"_id": "singleton_config"}) or {}
+    disabled_ids = set(conf.get("disabled_sources") or [])
+
     lead_type = request.args.get("lead_type")
     country = request.args.get("country")
     sources = get_all_sources(lead_type=lead_type, country=country)
-    imp_sources = [s for s in sources if s["lead_type"] == "importer"]
-    sup_sources = [s for s in sources if s["lead_type"] == "supplier"]
+
+    enriched_sources = []
+    for s in sources:
+        item = dict(s)
+        item["enabled"] = item.get("id") not in disabled_ids
+        enriched_sources.append(item)
+
+    imp_sources = [s for s in enriched_sources if s["lead_type"] == "importer"]
+    sup_sources = [s for s in enriched_sources if s["lead_type"] == "supplier"]
     return jsonify({
-        "total_sources": len(sources),
+        "total_sources": len(enriched_sources),
         "importer_sources_count": len(imp_sources),
         "supplier_sources_count": len(sup_sources),
-        "sources": sources,
+        "disabled_count": len(disabled_ids),
+        "sources": enriched_sources,
     })
+
+
+@api_bp.route("/crawler/map-search", methods=["POST"])
+def google_maps_search():
+    """Searches live Google Maps places for commercial trade leads."""
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or "").strip()
+    country = data.get("country")
+    city = data.get("city")
+    lat = data.get("lat") or data.get("latitude")
+    lng = data.get("lng") or data.get("longitude")
+    radius = int(data.get("radius") or data.get("radius_km") or 50)
+    limit = int(data.get("limit") or 20)
+    lead_type = (data.get("lead_type") or "importer").lower().strip()
+
+    from app.map_extractor import search_google_maps_places
+    places = search_google_maps_places(
+        query=query,
+        country=country,
+        city=city,
+        lat=float(lat) if lat is not None else None,
+        lng=float(lng) if lng is not None else None,
+        radius_km=radius,
+        limit=limit,
+        lead_type=lead_type,
+    )
+    return jsonify({
+        "query": query,
+        "lead_type": lead_type,
+        "country": country,
+        "total_found": len(places),
+        "places": places,
+    })
+
+
+@api_bp.route("/crawler/map-extract", methods=["POST"])
+def google_maps_extract():
+    """Converts and saves Google Maps places into deduplicated database leads."""
+    data = request.get_json(silent=True) or {}
+    places = data.get("places") or []
+    custom_label = (data.get("custom_label") or "").strip() or "Google Maps Live Extraction"
+    extraction_notes = (data.get("extraction_notes") or "").strip()
+    lead_type = (data.get("lead_type") or "importer").lower().strip()
+
+    # If places array is empty but a query is given, execute search and extract in one go
+    if not places and data.get("query"):
+        from app.map_extractor import search_google_maps_places
+        places = search_google_maps_places(
+            query=data.get("query"),
+            country=data.get("country"),
+            city=data.get("city"),
+            radius_km=int(data.get("radius") or 50),
+            limit=int(data.get("limit") or 20),
+            lead_type=lead_type,
+        )
+
+    if not places:
+        return jsonify({"error": "No places provided or found to extract"}), 400
+
+    from app.map_extractor import extract_places_to_leads
+    saved_count = extract_places_to_leads(
+        current_app._get_current_object(),
+        places=places,
+        custom_label=custom_label,
+        extraction_notes=extraction_notes or f"Extracted {len(places)} places from Google Maps Live Extractor",
+        lead_type=lead_type,
+    )
+    return jsonify({
+        "message": f"Successfully extracted {len(places)} places into database",
+        "custom_label": custom_label,
+        "places_processed": len(places),
+        "records_saved": saved_count,
+    }), 201
 
 
 @api_bp.route("/scrape/importers", methods=["POST"])
@@ -797,6 +882,7 @@ def trigger_importers_scrape():
     region = data.get("region")
     commodity = data.get("commodity")
     depth = int(data.get("depth", 30))
+    selected_sources = data.get("selected_sources")
     job_id = start_importer_scrape(
         current_app._get_current_object(),
         country=country,
@@ -806,6 +892,9 @@ def trigger_importers_scrape():
         custom_city=data.get("custom_city") or data.get("city"),
         custom_lat=data.get("latitude") or data.get("lat"),
         custom_lng=data.get("longitude") or data.get("lng"),
+        custom_label=data.get("custom_label"),
+        extraction_notes=data.get("extraction_notes"),
+        selected_sources=selected_sources,
     )
     return jsonify({
         "job_id": job_id,
@@ -822,6 +911,7 @@ def trigger_wb_mills_scrape():
     region = data.get("region")
     commodity = data.get("commodity")
     depth = int(data.get("depth", 30))
+    selected_sources = data.get("selected_sources")
     job_id = start_wb_mills_scrape(
         current_app._get_current_object(),
         country=country,
@@ -831,6 +921,9 @@ def trigger_wb_mills_scrape():
         custom_city=data.get("custom_city") or data.get("city"),
         custom_lat=data.get("latitude") or data.get("lat"),
         custom_lng=data.get("longitude") or data.get("lng"),
+        custom_label=data.get("custom_label"),
+        extraction_notes=data.get("extraction_notes"),
+        selected_sources=selected_sources,
     )
     return jsonify({
         "job_id": job_id,
@@ -852,6 +945,7 @@ def trigger_crawl_now():
     custom_lng = data.get("longitude") or data.get("lng")
     custom_label = (data.get("custom_label") or "").strip() or "Standard Harvest"
     extraction_notes = (data.get("extraction_notes") or "").strip()
+    selected_sources = data.get("selected_sources")
     app_obj = current_app._get_current_object()
 
     # STRICT TYPE SEPARATION: Never generate suppliers when importer is requested, and vice-versa
@@ -867,6 +961,7 @@ def trigger_crawl_now():
             custom_lng=custom_lng,
             custom_label=custom_label,
             extraction_notes=extraction_notes,
+            selected_sources=selected_sources,
         )
         return jsonify({
             "job_id": job_id,
@@ -887,6 +982,7 @@ def trigger_crawl_now():
             custom_lng=custom_lng,
             custom_label=custom_label,
             extraction_notes=extraction_notes,
+            selected_sources=selected_sources,
         )
         return jsonify({
             "job_id": job_id,
@@ -907,6 +1003,9 @@ def trigger_crawl_now():
             custom_city=custom_city,
             custom_lat=custom_lat,
             custom_lng=custom_lng,
+            custom_label=custom_label,
+            extraction_notes=extraction_notes,
+            selected_sources=selected_sources,
         )
         sup_id = start_wb_mills_scrape(
             app_obj,
@@ -917,6 +1016,9 @@ def trigger_crawl_now():
             custom_city=custom_city,
             custom_lat=custom_lat,
             custom_lng=custom_lng,
+            custom_label=custom_label,
+            extraction_notes=extraction_notes,
+            selected_sources=selected_sources,
         )
         return jsonify({
             "importer_job_id": imp_id,

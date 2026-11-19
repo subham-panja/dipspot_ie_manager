@@ -184,3 +184,100 @@ def test_crawler_history_endpoint(client):
     data = resp.get_json()
     assert "history" in data
     assert "total" in data
+
+
+def test_google_maps_extractor_endpoints(client):
+    """Verify Google Maps place search and extraction with ratings, coordinates, and custom labels."""
+    # 1. Map Search
+    search_resp = client.post(
+        "/api/crawler/map-search",
+        data=json.dumps({
+            "query": "Rice Importers in Dubai",
+            "country": "United Arab Emirates",
+            "city": "Dubai",
+            "limit": 3,
+            "lead_type": "importer",
+        }),
+        content_type="application/json",
+    )
+    assert search_resp.status_code == 200
+    search_data = search_resp.get_json()
+    assert search_data["total_found"] == 3
+    places = search_data["places"]
+    assert len(places) == 3
+    assert places[0]["google_rating"] >= 4.0
+    assert "ChIJ" in places[0]["place_id"]
+    assert "https://maps.google.com" in places[0]["google_maps_url"]
+
+    # 2. Map Extract
+    extract_resp = client.post(
+        "/api/crawler/map-extract",
+        data=json.dumps({
+            "places": places[:2],
+            "custom_label": "Dubai-Maps-Batch-1",
+            "extraction_notes": "Live Google Maps Extraction Test",
+            "lead_type": "importer",
+        }),
+        content_type="application/json",
+    )
+    assert extract_resp.status_code == 201
+    extract_data = extract_resp.get_json()
+    assert extract_data["places_processed"] == 2
+    assert extract_data["custom_label"] == "Dubai-Maps-Batch-1"
+
+    # Verify leads in database have Google Maps metadata
+    db = get_db()
+    saved_lead = db.leads.find_one({"custom_label": "Dubai-Maps-Batch-1"})
+    assert saved_lead is not None
+    assert saved_lead["source_name"] == "Google Maps Live Extractor"
+    assert saved_lead["google_place_id"] is not None
+    assert saved_lead["google_rating"] >= 4.0
+
+    # Cleanup
+    db.leads.delete_many({"custom_label": "Dubai-Maps-Batch-1"})
+    db.extraction_history.delete_many({"custom_label": "Dubai-Maps-Batch-1"})
+
+
+def test_sources_configuration_toggle_and_crawler_sync(client):
+    """Verify sources can be enabled/disabled in config and reflected on crawler sources endpoint."""
+    # 1. Fetch initial sources
+    r1 = client.get("/api/config/sources")
+    assert r1.status_code == 200
+    d1 = r1.get_json()
+    assert d1["total"] >= 216
+    assert d1["disabled_count"] == 0
+
+    # 2. Disable a specific source
+    r2 = client.patch(
+        "/api/config/sources",
+        data=json.dumps({
+            "toggle": {
+                "source_id": "imp-src-02",
+                "enabled": False,
+            }
+        }),
+        content_type="application/json",
+    )
+    assert r2.status_code == 200
+    d2 = r2.get_json()
+    assert "imp-src-02" in d2["disabled_sources"]
+
+    # 3. Check crawler endpoint reflects disabled status
+    r3 = client.get("/api/crawler/sources")
+    assert r3.status_code == 200
+    d3 = r3.get_json()
+    s02 = next((s for s in d3["sources"] if s["id"] == "imp-src-02"), None)
+    assert s02 is not None
+    assert s02["enabled"] is False
+
+    # 4. Reset all to enabled
+    r4 = client.patch(
+        "/api/config/sources",
+        data=json.dumps({"action": "enable_all"}),
+        content_type="application/json",
+    )
+    assert r4.status_code == 200
+    d4 = r4.get_json()
+    assert d4["disabled_count"] == 0
+
+
