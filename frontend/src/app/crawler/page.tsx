@@ -170,12 +170,24 @@ function CrawlerStepperContent() {
   const [historyRuns, setHistoryRuns] = useState<CrawlerJob[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Update default Dork query when commodity/country change
+  // Dynamically update default Campaign Name and default City when country/commodity/leadType changes
   useEffect(() => {
-    if (!customDorkQuery || customDorkQuery.startsWith('intitle:')) {
-      const term = leadType === 'importer' ? 'importers' : 'manufacturers';
-      const q = `intitle:"${term}" "${commodity}" "${effectiveCountry}" -filetype:pdf`;
-      setCustomDorkQuery(q);
+    const lType = leadType === 'importer' ? 'Buyers' : 'Suppliers';
+    if (!customLabel || customLabel.includes('Harvest') || customLabel.includes('Dubai Basmati Q1 Harvest')) {
+      setCustomLabel(`${effectiveCountry} ${commodity} ${lType} Q1 Harvest`);
+    }
+
+    // Auto-align default city to selected country
+    if (effectiveCountry === 'Togo' && (!city || city === 'Dubai')) {
+      setCity('Lome');
+    } else if (effectiveCountry === 'United Arab Emirates' && (!city || city === 'Lome')) {
+      setCity('Dubai');
+    } else if (effectiveCountry === 'Saudi Arabia' && (!city || city === 'Dubai' || city === 'Lome')) {
+      setCity('Riyadh');
+    } else if (effectiveCountry === 'India' && (!city || city === 'Dubai' || city === 'Lome')) {
+      setCity('Kolkata');
+    } else if (effectiveCountry === 'Singapore' && (!city || city === 'Dubai' || city === 'Lome')) {
+      setCity('Singapore');
     }
   }, [commodity, effectiveCountry, leadType]);
 
@@ -649,6 +661,10 @@ function CrawlerStepperContent() {
                   <option value="Kuwait">Kuwait (Shuwaikh Port)</option>
                   <option value="Oman">Oman (Sohar, Muscat)</option>
                   <option value="Bahrain">Bahrain (Khalifa Bin Salman Port)</option>
+                  <option value="Togo">Togo (Lome, Autonomous Port of Lome)</option>
+                  <option value="Benin">Benin (Cotonou, Autonomous Port of Cotonou)</option>
+                  <option value="Nigeria">Nigeria (Lagos, Port of Apapa / Tin Can)</option>
+                  <option value="Kenya">Kenya (Mombasa, Kilindini Harbour)</option>
                   <option value="India">India (West Bengal, Punjab, Haryana, Gujarat)</option>
                   <option value="United States">United States (California, Houston, New York)</option>
                   <option value="Germany">Germany (Hamburg, Bremen)</option>

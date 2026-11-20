@@ -814,7 +814,7 @@ def _generate_dynamic_importers(
 
         doc = dict(base_item)
         doc["country"] = country_name
-        doc["city_or_hub"] = f"{city}, {country_name}"
+        doc["city_or_hub"] = city
         doc["phones"] = phone
         doc["lead_type"] = "importer"
         doc["matched_varieties"] = commodity
@@ -825,7 +825,14 @@ def _generate_dynamic_importers(
         doc["latitude"] = round(base_lat + ((i % 10) - 5) * 0.015, 5)
         doc["longitude"] = round(base_lng + ((i % 10) - 5) * 0.015, 5)
         doc["nearest_port"] = port
-        doc["address"] = f"Commercial Logistics Terminal, {city}, {country_name}"
+        
+        base_addr = base_item.get("address", "")
+        foreign_flags = ["india", "bengal", "hooghly", "arambagh", "burdwan", "punjab", "haryana", "delhi", "dubai", "uae", "saudi", "usa"]
+        has_foreign = any(kw in base_addr.lower() for kw in foreign_flags if kw not in country_name.lower())
+        if has_foreign or country_name.lower() not in base_addr.lower():
+            doc["address"] = f"Commercial Logistics Terminal, {city}, {country_name}"
+        else:
+            doc["address"] = base_addr
         if is_gmaps:
             doc["google_place_id"] = place_id
             doc["google_rating"] = rating
