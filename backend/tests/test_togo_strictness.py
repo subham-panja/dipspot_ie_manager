@@ -127,3 +127,4 @@ def test_end_to_end_togo_crawler_job():
             assert "arambagh" not in l["city_or_hub"].lower(), f"Arambagh in city_or_hub: {l['city_or_hub']}"
             assert "annapurna" not in l["company_name"].lower(), f"Annapurna leaked into Togo: {l['company_name']}"
             assert l["lead_type"] == "importer"
+
