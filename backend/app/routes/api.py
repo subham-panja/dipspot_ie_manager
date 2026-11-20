@@ -198,6 +198,14 @@ def get_leads():
     if lead_type:
         filter_q["lead_type"] = lead_type
 
+    job_id = request.args.get("job_id", type=int)
+    if job_id is not None:
+        filter_q["job_id"] = job_id
+
+    custom_label = request.args.get("custom_label")
+    if custom_label:
+        filter_q["custom_label"] = custom_label
+
     country = request.args.get("country")
     if country:
         filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
@@ -758,6 +766,14 @@ def export_leads_csv():
     lead_type = request.args.get("lead_type")
     if lead_type:
         filter_q["lead_type"] = lead_type
+
+    job_id = request.args.get("job_id", type=int)
+    if job_id is not None:
+        filter_q["job_id"] = job_id
+
+    custom_label = request.args.get("custom_label")
+    if custom_label:
+        filter_q["custom_label"] = custom_label
 
     country = request.args.get("country")
     if country:

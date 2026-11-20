@@ -21,8 +21,6 @@ import {
   Clock,
   ExternalLink,
   History,
-  CheckSquare,
-  Square,
   Terminal,
   Loader2,
   RefreshCw,
@@ -31,7 +29,16 @@ import {
   AlertCircle,
   Database,
   Cpu,
-  Share2,
+  Download,
+  Eye,
+  FileText,
+  Zap,
+  Sliders,
+  Award,
+  ChevronRight,
+  CheckSquare,
+  Square,
+  Hash,
 } from 'lucide-react';
 
 interface CrawlerSource {
@@ -79,6 +86,44 @@ interface CrawlerJob {
   logs?: CrawlerJobLog[];
 }
 
+interface LeadPreviewItem {
+  id: number | string;
+  company_name: string;
+  country: string;
+  city_or_hub?: string;
+  matched_varieties?: string;
+  lead_type: string;
+  emails?: string;
+  phones?: string;
+  website?: string;
+  priority_score?: number;
+}
+
+const DEPTH_PRESETS = [
+  { value: 15, label: 'Quick 15', desc: 'Rapid spot check across top hubs' },
+  { value: 50, label: 'Standard 50', desc: 'Balanced discovery across key directories' },
+  { value: 100, label: 'Deep 100', desc: 'Comprehensive multi-source penetration' },
+  { value: 200, label: 'Scale 200', desc: 'Full regional trade corridor harvest' },
+];
+
+const COMMODITY_PRESETS = [
+  'Basmati Rice 1121',
+  'IR-64 Parboiled Rice',
+  'Swarna Non-Basmati',
+  'Sona Masoori Rice',
+  'Organic Wheat',
+  'Yellow Maize',
+  'Spices & Cumin Seeds',
+];
+
+const SOURCE_CATEGORIES = [
+  { id: 'all', label: 'All Sources' },
+  { id: 'b2b', label: 'B2B Trade Portals' },
+  { id: 'customs', label: 'Customs & Port Manifests' },
+  { id: 'gov', label: 'Government Trade Boards' },
+  { id: 'geo', label: 'Geospatial & Map Registries' },
+];
+
 function CrawlerStepperContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -95,7 +140,7 @@ function CrawlerStepperContent() {
   const [customCountryInput, setCustomCountryInput] = useState('');
   const [city, setCity] = useState('Dubai');
   const [commodity, setCommodity] = useState('Basmati Rice');
-  const [depth, setDepth] = useState(25);
+  const [depth, setDepth] = useState(50);
   const [extractionNotes, setExtractionNotes] = useState('High-priority Basmati wholesale buyers and registered trade licensees.');
 
   // Effective Country
@@ -107,6 +152,7 @@ function CrawlerStepperContent() {
   const [availableSources, setAvailableSources] = useState<CrawlerSource[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(new Set());
   const [sourceSearch, setSourceSearch] = useState('');
+  const [selectedCategoryTab, setSelectedCategoryTab] = useState('all');
   const [loadingSources, setLoadingSources] = useState(false);
   const [enableGoogleDork, setEnableGoogleDork] = useState(true);
   const [customDorkQuery, setCustomDorkQuery] = useState('');
@@ -115,6 +161,9 @@ function CrawlerStepperContent() {
   // Step 3: Background Execution & Monitoring
   const [activeJob, setActiveJob] = useState<CrawlerJob | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState<'terminal' | 'leads'>('terminal');
+  const [liveLeads, setLiveLeads] = useState<LeadPreviewItem[]>([]);
+  const [loadingLiveLeads, setLoadingLiveLeads] = useState(false);
   const terminalBottomRef = useRef<HTMLDivElement>(null);
 
   // Crawling History
@@ -166,6 +215,20 @@ function CrawlerStepperContent() {
     }
   };
 
+  // Fetch leads harvested for the current job for live preview
+  const loadLiveJobLeads = async (jobId: number) => {
+    try {
+      setLoadingLiveLeads(true);
+      const res = await fetchJson<{ leads?: LeadPreviewItem[]; items?: LeadPreviewItem[] }>(`/leads?job_id=${jobId}&limit=50`);
+      const items = res.leads || res.items || [];
+      setLiveLeads(items);
+    } catch (e) {
+      console.error('Failed to load live leads preview:', e);
+    } finally {
+      setLoadingLiveLeads(false);
+    }
+  };
+
   // On initial mount: Check for any actively running background crawler job
   useEffect(() => {
     loadHistory();
@@ -200,6 +263,7 @@ function CrawlerStepperContent() {
           setActiveJob(res.job);
           if (res.job.status === 'completed' || res.job.status === 'failed') {
             loadHistory();
+            loadLiveJobLeads(jobId);
           }
         }
       } catch (e) {
@@ -210,12 +274,19 @@ function CrawlerStepperContent() {
     return () => clearInterval(interval);
   }, [currentStep, activeJob?.status, activeJob?.job_id]);
 
+  // Load preview leads when job completes or when switching to leads tab
+  useEffect(() => {
+    if (currentStep === 3 && activeJob?.job_id && activeTab === 'leads') {
+      loadLiveJobLeads(activeJob.job_id);
+    }
+  }, [currentStep, activeTab, activeJob?.job_id]);
+
   // Auto-scroll terminal log
   useEffect(() => {
-    if (currentStep === 3 && terminalBottomRef.current) {
+    if (currentStep === 3 && activeTab === 'terminal' && terminalBottomRef.current) {
       terminalBottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [activeJob?.logs?.length, currentStep]);
+  }, [activeJob?.logs?.length, currentStep, activeTab]);
 
   // Handle Stepper Navigation
   const handleProceedToStep2 = () => {
@@ -270,6 +341,7 @@ function CrawlerStepperContent() {
         };
         setActiveJob(initialJob);
         setCurrentStep(3);
+        setActiveTab('terminal');
         loadHistory();
       }
     } catch (e: any) {
@@ -279,9 +351,29 @@ function CrawlerStepperContent() {
     }
   };
 
-  // Filter sources displayed in Step 2
+  // Dork Modifier Chip Toggles
+  const toggleDorkModifier = (chipText: string) => {
+    setCustomDorkQuery((prev) => {
+      if (prev.includes(chipText)) {
+        return prev.replace(chipText, '').trim();
+      } else {
+        return `${prev} ${chipText}`.trim();
+      }
+    });
+  };
+
+  // Filter sources displayed in Step 2 by Search and Category Tab
   const filteredSources = useMemo(() => {
     return availableSources.filter((s) => {
+      // Category filter
+      if (selectedCategoryTab !== 'all') {
+        const cat = s.category.toLowerCase();
+        if (selectedCategoryTab === 'b2b' && !cat.includes('b2b') && !cat.includes('marketplace') && !cat.includes('portal')) return false;
+        if (selectedCategoryTab === 'customs' && !cat.includes('customs') && !cat.includes('manifest') && !cat.includes('maritime') && !cat.includes('port')) return false;
+        if (selectedCategoryTab === 'gov' && !cat.includes('government') && !cat.includes('authority') && !cat.includes('board') && !cat.includes('registry') && !cat.includes('ministry')) return false;
+        if (selectedCategoryTab === 'geo' && !cat.includes('map') && !cat.includes('geospatial') && !cat.includes('directory')) return false;
+      }
+      // Text search
       if (!sourceSearch.trim()) return true;
       const q = sourceSearch.toLowerCase();
       return (
@@ -291,7 +383,7 @@ function CrawlerStepperContent() {
         s.country_coverage.toLowerCase().includes(q)
       );
     });
-  }, [availableSources, sourceSearch]);
+  }, [availableSources, sourceSearch, selectedCategoryTab]);
 
   const toggleSourceSelection = (id: string) => {
     const updated = new Set(selectedSourceIds);
@@ -312,6 +404,25 @@ function CrawlerStepperContent() {
     setSelectedSourceIds(new Set());
   };
 
+  const selectCurrentCategoryOnly = () => {
+    const ids = new Set(selectedSourceIds);
+    filteredSources.forEach((s) => ids.add(s.id));
+    setSelectedSourceIds(ids);
+  };
+
+  // Clone/Populate parameters from history run
+  const cloneHistoricalRun = (run: CrawlerJob) => {
+    if (run.custom_label) setCustomLabel(`${run.custom_label} (Re-run)`);
+    if (run.lead_type === 'importer' || run.lead_type === 'supplier') setLeadType(run.lead_type);
+    if (run.country) {
+      setSelectedCountryPreset(run.country);
+      if (run.country === 'Global') setSelectedCountryPreset('Global');
+    }
+    if (run.commodity) setCommodity(run.commodity);
+    if (run.depth) setDepth(run.depth);
+    setCurrentStep(1);
+  };
+
   // URL Query Navigation to Leads Page
   const navigateToLeadsFiltered = (job?: CrawlerJob) => {
     const targetJob = job || activeJob;
@@ -330,10 +441,46 @@ function CrawlerStepperContent() {
     router.push(`${targetPath}?${params.toString()}`);
   };
 
+  // Direct CSV Export
+  const downloadCsvExport = (jobId?: number) => {
+    const targetId = jobId ?? activeJob?.job_id;
+    const params = new URLSearchParams();
+    if (targetId) params.append('job_id', String(targetId));
+    if (leadType) params.append('lead_type', leadType);
+    window.open(`/api/leads/export?${params.toString()}`, '_blank');
+  };
+
+  // Direct JSON Export
+  const downloadJsonExport = async (jobId?: number) => {
+    const targetId = jobId ?? activeJob?.job_id;
+    try {
+      const res = await fetchJson<{ leads: any[] }>(`/leads?job_id=${targetId}&limit=500`);
+      const leads = res.leads || [];
+      const blob = new Blob([JSON.stringify(leads, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `TradeLeads_Job_${targetId || 'export'}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Export failed: ${e.message}`);
+    }
+  };
+
+  // Calculated Velocity (leads/sec)
+  const crawlVelocity = useMemo(() => {
+    if (!activeJob || !activeJob.elapsed_seconds || activeJob.elapsed_seconds <= 0) return '0.0';
+    const found = activeJob.leads_found || activeJob.inserted_count || 0;
+    return (found / activeJob.elapsed_seconds).toFixed(1);
+  }, [activeJob?.leads_found, activeJob?.inserted_count, activeJob?.elapsed_seconds]);
+
   return (
     <Shell>
       <div className="max-w-6xl mx-auto space-y-6 pb-20">
-        {/* Page Title & Breadcrumb */}
+        {/* Page Title & Breadcrumb Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-5 border-slate-800/40">
           <div>
             <div className="flex items-center gap-2 text-xs text-blue-400 font-semibold mb-1">
@@ -355,7 +502,7 @@ function CrawlerStepperContent() {
               onClick={() => activeJob?.status !== 'running' && setCurrentStep(1)}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition cursor-pointer ${
                 currentStep === 1
-                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-400 font-bold'
+                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-400 font-bold shadow-sm shadow-blue-500/10'
                   : currentStep > 1
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-medium'
                   : 'bg-slate-900 border-slate-800 text-slate-500'
@@ -374,7 +521,7 @@ function CrawlerStepperContent() {
               onClick={() => activeJob?.status !== 'running' && currentStep > 1 && setCurrentStep(2)}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition cursor-pointer ${
                 currentStep === 2
-                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-400 font-bold'
+                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-400 font-bold shadow-sm shadow-blue-500/10'
                   : currentStep > 2
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-medium'
                   : 'bg-slate-900 border-slate-800 text-slate-500'
@@ -393,7 +540,7 @@ function CrawlerStepperContent() {
               onClick={() => activeJob && setCurrentStep(3)}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition cursor-pointer ${
                 currentStep === 3
-                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-400 font-bold'
+                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-400 font-bold shadow-sm shadow-blue-500/10'
                   : activeJob
                   ? 'bg-slate-900 border-slate-800 text-slate-300'
                   : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
@@ -411,7 +558,7 @@ function CrawlerStepperContent() {
         {/* STEP 1: CAMPAIGN SETUP & TARGET PARAMETERS */}
         {/* ============================================================ */}
         {currentStep === 1 && (
-          <div className={`p-6 rounded-2xl border space-y-6 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/60 border-slate-800'}`}>
+          <div className={`p-6 rounded-2xl border space-y-6 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 backdrop-blur-xl border-slate-800'}`}>
             <div className="flex items-center justify-between border-b pb-4 border-slate-800/40">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -419,7 +566,7 @@ function CrawlerStepperContent() {
                   Step 1: Campaign Configuration &amp; Target Trade Parameters
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Define your lead segment, geographic perimeter, target commodity, and custom harvest tracking label.
+                  Define your lead segment, geographic perimeter, target commodity, and quota depth.
                 </p>
               </div>
               <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
@@ -461,7 +608,7 @@ function CrawlerStepperContent() {
                     onClick={() => setLeadType('importer')}
                     className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition ${
                       leadType === 'importer'
-                        ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                        ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/20'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
@@ -473,7 +620,7 @@ function CrawlerStepperContent() {
                     onClick={() => setLeadType('supplier')}
                     className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition ${
                       leadType === 'supplier'
-                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/20'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
@@ -538,9 +685,12 @@ function CrawlerStepperContent() {
                 />
               </div>
 
-              {/* Commodity Focus */}
-              <div className="space-y-1.5">
-                <label className="font-semibold text-slate-300">Commodity Focus</label>
+              {/* Commodity Focus with Quick Chips */}
+              <div className="space-y-1.5 md:col-span-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold text-slate-300">Commodity Focus</label>
+                  <span className="text-[11px] text-slate-500">Click quick chip or type custom specification</span>
+                </div>
                 <input
                   type="text"
                   value={commodity}
@@ -550,34 +700,70 @@ function CrawlerStepperContent() {
                     isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white focus:border-blue-500'
                   }`}
                 />
-              </div>
-
-              {/* Target Depth */}
-              <div className="space-y-1.5">
-                <label className="font-semibold text-slate-300">Verified Leads Quota (Depth)</label>
-                <div className="flex items-center gap-2">
-                  {[15, 25, 50, 100].map((num) => (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {COMMODITY_PRESETS.map((c) => (
                     <button
-                      key={num}
+                      key={c}
                       type="button"
-                      onClick={() => setDepth(num)}
-                      className={`flex-1 py-2 rounded-xl border text-xs font-bold transition ${
-                        depth === num
-                          ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      onClick={() => setCommodity(c)}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg border transition ${
+                        commodity === c
+                          ? 'bg-blue-600/20 text-blue-400 border-blue-500/40 font-semibold'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
                       }`}
                     >
-                      {num} Leads
+                      {c}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Target Depth with Modern Presets */}
+              <div className="space-y-2 md:col-span-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    Verified Leads Quota (Harvest Depth)
+                  </label>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    Targeting {depth} records &bull; Est. time: ~{Math.max(15, Math.round(depth * 0.45))}s
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {DEPTH_PRESETS.map((preset) => {
+                    const isSelected = depth === preset.value;
+                    return (
+                      <div
+                        key={preset.value}
+                        onClick={() => setDepth(preset.value)}
+                        className={`p-3 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-blue-600/15 border-blue-500 text-white shadow-md shadow-blue-500/10'
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-sm">{preset.label}</span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-blue-400" />}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">{preset.desc}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-3 pt-1">
+                  <span className="text-xs text-slate-400">Or custom quota:</span>
                   <input
                     type="number"
                     min={1}
-                    max={250}
+                    max={300}
                     value={depth}
-                    onChange={(e) => setDepth(Number(e.target.value))}
-                    className="w-20 px-2 py-2 rounded-xl border border-slate-800 bg-slate-950 text-white text-xs text-center font-bold"
+                    onChange={(e) => setDepth(Math.max(1, Math.min(300, Number(e.target.value) || 1)))}
+                    className="w-24 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-950 text-white text-xs font-mono text-center font-bold focus:border-blue-500 outline-none"
                   />
+                  <span className="text-[11px] text-slate-500">Max limit: 300 leads per crawl cycle</span>
                 </div>
               </div>
             </div>
@@ -617,7 +803,7 @@ function CrawlerStepperContent() {
         {/* STEP 2: SOURCE SELECTION, GOOGLE DORKS & PROXY SHIELD */}
         {/* ============================================================ */}
         {currentStep === 2 && (
-          <div className={`p-6 rounded-2xl border space-y-6 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/60 border-slate-800'}`}>
+          <div className={`p-6 rounded-2xl border space-y-6 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 backdrop-blur-xl border-slate-800'}`}>
             <div className="flex items-center justify-between border-b pb-4 border-slate-800/40">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -639,7 +825,7 @@ function CrawlerStepperContent() {
               </div>
             </div>
 
-            {/* Google Dork Harvester Card */}
+            {/* Interactive Google Dork Harvester Card */}
             <div className="p-4 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
@@ -670,10 +856,14 @@ function CrawlerStepperContent() {
               </div>
 
               {enableGoogleDork && (
-                <div className="space-y-1.5 pt-1">
-                  <label className="text-[11px] font-semibold text-slate-400">
-                    Customizable Google Dork Query Expression:
-                  </label>
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-slate-400">
+                      Google Dork Expression:
+                    </label>
+                    <span className="text-[10px] text-slate-500">Click chips below to toggle query parameters</span>
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
@@ -692,6 +882,35 @@ function CrawlerStepperContent() {
                     >
                       Reset Default
                     </button>
+                  </div>
+
+                  {/* Interactive Modifier Chips */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-500 mr-1">Quick Modifiers:</span>
+                    {[
+                      '-filetype:pdf',
+                      '-retail -shop -b2c',
+                      `intext:"${city}"`,
+                      '"HACCP" OR "ISO 22000"',
+                      '"CIF" OR "FOB"',
+                      '"Consignee" OR "Bill of Lading"',
+                    ].map((mod) => {
+                      const isActive = customDorkQuery.includes(mod);
+                      return (
+                        <button
+                          key={mod}
+                          type="button"
+                          onClick={() => toggleDorkModifier(mod)}
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded border transition ${
+                            isActive
+                              ? 'bg-blue-600 text-white border-blue-500 font-bold'
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                          }`}
+                        >
+                          {isActive ? `✓ ${mod}` : `+ ${mod}`}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -726,7 +945,7 @@ function CrawlerStepperContent() {
               </label>
             </div>
 
-            {/* Source Selection Grid */}
+            {/* Source Category Tabs & Selection Matrix */}
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
@@ -745,7 +964,7 @@ function CrawlerStepperContent() {
                       type="text"
                       value={sourceSearch}
                       onChange={(e) => setSourceSearch(e.target.value)}
-                      placeholder="Search sources..."
+                      placeholder="Search sources or domains..."
                       className="w-full text-xs pl-8 pr-3 py-1.5 rounded-xl border border-slate-800 bg-slate-950 text-white outline-none focus:border-blue-500"
                     />
                     <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
@@ -765,6 +984,33 @@ function CrawlerStepperContent() {
                     Deselect All
                   </button>
                 </div>
+              </div>
+
+              {/* Category Filter Tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                {SOURCE_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSelectedCategoryTab(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl border text-xs whitespace-nowrap transition font-medium ${
+                      selectedCategoryTab === cat.id
+                        ? 'bg-blue-600/20 border-blue-500 text-blue-400 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+                {selectedCategoryTab !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={selectCurrentCategoryOnly}
+                    className="ml-auto text-[11px] text-blue-400 hover:underline"
+                  >
+                    Select All in Category
+                  </button>
+                )}
               </div>
 
               {/* Sources Scrollable List */}
@@ -801,7 +1047,7 @@ function CrawlerStepperContent() {
                           <div>
                             <div className="font-bold text-white flex items-center gap-2">
                               <span>{src.name}</span>
-                              <span className="text-[10px] text-slate-400 font-normal">({src.domain})</span>
+                              <span className="text-[10px] text-slate-400 font-normal font-mono">({src.domain})</span>
                             </div>
                             <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
                               <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">
@@ -814,7 +1060,9 @@ function CrawlerStepperContent() {
                         </div>
 
                         <div className="flex items-center gap-3">
-                          <span className="text-[11px] font-mono font-bold text-emerald-400">
+                          <span className={`text-[11px] font-mono font-bold ${
+                            src.reliability_score >= 95 ? 'text-emerald-400' : src.reliability_score >= 90 ? 'text-blue-400' : 'text-amber-400'
+                          }`}>
                             {src.reliability_score}% Reliability
                           </span>
                           <a
@@ -849,7 +1097,7 @@ function CrawlerStepperContent() {
                 disabled={isSubmitting || selectedSourceIds.size === 0}
                 onClick={handleLaunchCrawler}
                 className={`px-6 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-2 transition shadow-lg ${
-                  selectedSourceIds.size === 0 ? 'opacity-50 cursor-not-allowed bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-500'
+                  selectedSourceIds.size === 0 ? 'opacity-50 cursor-not-allowed bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
                 }`}
               >
                 {isSubmitting ? (
@@ -869,10 +1117,10 @@ function CrawlerStepperContent() {
         )}
 
         {/* ============================================================ */}
-        {/* STEP 3: BACKGROUND CRAWLER MONITOR & COMPLETION CARD */}
+        {/* STEP 3: BACKGROUND CRAWLER MONITOR & ARRESTING STREAM */}
         {/* ============================================================ */}
         {currentStep === 3 && (
-          <div className={`p-6 rounded-2xl border space-y-6 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/60 border-slate-800'}`}>
+          <div className={`p-6 rounded-2xl border space-y-6 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 backdrop-blur-xl border-slate-800'}`}>
             {/* Monitor Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 border-slate-800/40">
               <div>
@@ -880,7 +1128,7 @@ function CrawlerStepperContent() {
                   <h2 className="text-base font-bold text-white">
                     {activeJob?.custom_label || customLabel}
                   </h2>
-                  <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold uppercase ${
+                  <span className={`text-[10px] px-2.5 py-0.5 rounded font-mono font-bold uppercase ${
                     activeJob?.status === 'completed'
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                       : activeJob?.status === 'running'
@@ -901,6 +1149,24 @@ function CrawlerStepperContent() {
               </div>
 
               <div className="flex items-center gap-2">
+                {activeJob?.status === 'completed' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => downloadCsvExport()}
+                      className="px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 text-slate-200 text-xs font-semibold hover:bg-slate-800 flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-400" /> Export CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => downloadJsonExport()}
+                      className="px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 text-slate-200 text-xs font-semibold hover:bg-slate-800 flex items-center gap-1.5"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-blue-400" /> Export JSON
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -915,7 +1181,7 @@ function CrawlerStepperContent() {
 
             {/* Completed Celebration Banner */}
             {activeJob?.status === 'completed' && (
-              <div className="p-5 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 space-y-4">
+              <div className="p-5 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 space-y-4 shadow-lg shadow-emerald-500/5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
@@ -926,22 +1192,24 @@ function CrawlerStepperContent() {
                         Background Harvest Completed Successfully!
                       </h3>
                       <p className="text-xs text-slate-300 mt-0.5">
-                        Processed {activeJob.total_discovered || activeJob.leads_found || 0} genuine entities &bull; Saved{' '}
-                        <strong className="text-emerald-400">{activeJob.inserted_count ?? activeJob.leads_found} new records</strong>{' '}
+                        Discovered {activeJob.total_discovered || activeJob.leads_found || 0} genuine entities &bull; Saved{' '}
+                        <strong className="text-emerald-400 font-bold">{activeJob.inserted_count ?? activeJob.leads_found} new verified records</strong>{' '}
                         &bull; Merged <strong className="text-blue-400">{activeJob.merged_count || 0} duplicates (95% ML Match)</strong>
                       </p>
                     </div>
                   </div>
 
                   {/* PROMINENT CTA: GO TO LEADS PAGE */}
-                  <button
-                    type="button"
-                    onClick={() => navigateToLeadsFiltered()}
-                    className="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg transition transform hover:scale-[1.02]"
-                  >
-                    <span>Go to Leads Page</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigateToLeadsFiltered()}
+                      className="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg transition transform hover:scale-[1.02]"
+                    >
+                      <span>Go to Leads Page</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -966,30 +1234,43 @@ function CrawlerStepperContent() {
                 />
               </div>
 
-              {/* Metrics Row */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs">
-                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60">
-                  <div className="text-slate-400 text-[11px]">Leads Discovered</div>
-                  <div className="text-lg font-bold text-white mt-0.5">
-                    {activeJob?.leads_found || 0}
+              {/* KPI Cards Row (5 Metrics) */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 text-xs">
+                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                  <div className="text-slate-400 text-[11px] flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                    Discovered
+                  </div>
+                  <div className="text-xl font-bold text-white mt-1">
+                    {activeJob?.total_discovered || activeJob?.leads_found || 0}
                   </div>
                 </div>
-                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60">
-                  <div className="text-slate-400 text-[11px]">Elapsed Time</div>
-                  <div className="text-lg font-bold text-white mt-0.5">
-                    {activeJob?.elapsed_seconds ? `${activeJob.elapsed_seconds}s` : '0s'}
-                  </div>
-                </div>
-                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60">
-                  <div className="text-slate-400 text-[11px]">New Inserted</div>
-                  <div className="text-lg font-bold text-emerald-400 mt-0.5">
+
+                <div className="p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 flex flex-col justify-between">
+                  <div className="text-emerald-400 text-[11px] font-semibold">Verified Inserted</div>
+                  <div className="text-xl font-bold text-emerald-400 mt-1">
                     {activeJob?.inserted_count ?? activeJob?.leads_found ?? 0}
                   </div>
                 </div>
-                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60">
+
+                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
                   <div className="text-slate-400 text-[11px]">Duplicates Merged</div>
-                  <div className="text-lg font-bold text-blue-400 mt-0.5">
+                  <div className="text-xl font-bold text-blue-400 mt-1">
                     {activeJob?.merged_count || 0}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between">
+                  <div className="text-slate-400 text-[11px]">Harvest Velocity</div>
+                  <div className="text-xl font-bold text-amber-400 mt-1 font-mono">
+                    {crawlVelocity} <span className="text-[10px] text-slate-400 font-normal">leads/s</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex flex-col justify-between col-span-2 sm:col-span-1">
+                  <div className="text-slate-400 text-[11px]">Elapsed Time</div>
+                  <div className="text-xl font-bold text-white mt-1 font-mono">
+                    {activeJob?.elapsed_seconds ? `${activeJob.elapsed_seconds}s` : '0s'}
                   </div>
                 </div>
               </div>
@@ -1010,57 +1291,151 @@ function CrawlerStepperContent() {
               </div>
             )}
 
-            {/* Live Audit Log Terminal Stream */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span className="flex items-center gap-1.5 font-semibold text-slate-300">
-                  <Terminal className="w-3.5 h-3.5 text-blue-400" />
-                  Live Compliance &amp; Extraction Audit Stream
-                </span>
+            {/* Dual Stream Tabs: Terminal Stream vs Live Arriving Leads Preview */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('terminal')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                      activeTab === 'terminal'
+                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Terminal className="w-3.5 h-3.5" />
+                    <span>Live Compliance Audit Stream</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('leads')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                      activeTab === 'leads'
+                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Live Arriving Leads Preview ({liveLeads.length})</span>
+                  </button>
+                </div>
+
                 <span className="text-[11px] text-slate-500">
-                  Runs asynchronously in background &bull; Navigating away preserves progress
+                  Async background engine &bull; Navigation preserves execution
                 </span>
               </div>
 
-              <div className="h-56 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] space-y-1.5">
-                {(!activeJob?.logs || activeJob.logs.length === 0) ? (
-                  <div className="text-slate-600 text-center py-8">
-                    Waiting for initial stream from background worker...
-                  </div>
-                ) : (
-                  activeJob.logs.map((log, idx) => (
-                    <div key={idx} className="flex items-start gap-2 leading-relaxed">
-                      <span className="text-slate-600 select-none">
-                        [{log.elapsed_seconds.toFixed(1)}s]
-                      </span>
-                      <span className={`px-1.5 py-0.2 rounded font-bold text-[9px] uppercase ${
-                        log.level === 'HTTP'
-                          ? 'bg-blue-500/20 text-blue-400'
-                          : log.level === 'ROBOTS'
-                          ? 'bg-amber-500/20 text-amber-400'
-                          : log.level === 'PARSE'
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : log.level === 'DORK'
-                          ? 'bg-purple-500/20 text-purple-400'
-                          : log.level === 'DEDUP'
-                          ? 'bg-indigo-500/20 text-indigo-400'
-                          : log.level === 'SUCCESS'
-                          ? 'bg-emerald-500/30 text-emerald-300'
-                          : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {log.level}
-                      </span>
-                      <span className="text-slate-300 break-all">{log.message}</span>
-                      {log.latency_ms && (
-                        <span className="text-slate-500 text-[10px] ml-auto shrink-0">
-                          {log.latency_ms}ms
-                        </span>
-                      )}
+              {/* TAB 1: TERMINAL STREAM */}
+              {activeTab === 'terminal' && (
+                <div className="h-60 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] space-y-1.5">
+                  {(!activeJob?.logs || activeJob.logs.length === 0) ? (
+                    <div className="text-slate-600 text-center py-10">
+                      Waiting for initial stream from background worker...
                     </div>
-                  ))
-                )}
-                <div ref={terminalBottomRef} />
-              </div>
+                  ) : (
+                    activeJob.logs.map((log, idx) => (
+                      <div key={idx} className="flex items-start gap-2 leading-relaxed">
+                        <span className="text-slate-600 select-none">
+                          [{log.elapsed_seconds.toFixed(1)}s]
+                        </span>
+                        <span className={`px-1.5 py-0.2 rounded font-bold text-[9px] uppercase ${
+                          log.level === 'HTTP'
+                            ? 'bg-blue-500/20 text-blue-400'
+                            : log.level === 'ROBOTS'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : log.level === 'PARSE'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : log.level === 'DORK'
+                            ? 'bg-purple-500/20 text-purple-400'
+                            : log.level === 'DEDUP'
+                            ? 'bg-indigo-500/20 text-indigo-400'
+                            : log.level === 'MERGED'
+                            ? 'bg-blue-500/30 text-blue-300'
+                            : log.level === 'GEO'
+                            ? 'bg-cyan-500/20 text-cyan-300'
+                            : log.level === 'SUCCESS'
+                            ? 'bg-emerald-500/30 text-emerald-300'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          {log.level}
+                        </span>
+                        <span className="text-slate-300 break-all">{log.message}</span>
+                        {log.latency_ms && (
+                          <span className="text-slate-500 text-[10px] ml-auto shrink-0">
+                            {log.latency_ms}ms
+                          </span>
+                        )}
+                      </div>
+                    ))
+                  )}
+                  <div ref={terminalBottomRef} />
+                </div>
+              )}
+
+              {/* TAB 2: LIVE ARRIVING LEADS PREVIEW */}
+              {activeTab === 'leads' && (
+                <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950">
+                  <div className="max-h-60 overflow-y-auto">
+                    {loadingLiveLeads ? (
+                      <div className="py-12 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                        Fetching leads captured in this harvest...
+                      </div>
+                    ) : liveLeads.length === 0 ? (
+                      <div className="py-10 text-center text-xs text-slate-500">
+                        No leads captured yet for Job #{activeJob?.job_id}. Once records are verified, they will appear here in real-time.
+                      </div>
+                    ) : (
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900/80 text-[10px] uppercase font-semibold text-slate-400 border-b border-slate-800">
+                          <tr>
+                            <th className="py-2 px-3">Company Name</th>
+                            <th className="py-2 px-3">Hub &amp; Country</th>
+                            <th className="py-2 px-3">Commodity / Variety</th>
+                            <th className="py-2 px-3">Domain / Contact</th>
+                            <th className="py-2 px-3 text-right">Score</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40">
+                          {liveLeads.map((lead) => (
+                            <tr key={lead.id} className="hover:bg-slate-900/40 transition">
+                              <td className="py-2.5 px-3 font-semibold text-white">
+                                {lead.company_name}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-400">
+                                {lead.city_or_hub ? `${lead.city_or_hub}, ` : ''}{lead.country}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-300">
+                                {lead.matched_varieties || 'Basmati Rice'}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {lead.website ? (
+                                  <a
+                                    href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-blue-400 hover:underline flex items-center gap-1 text-[11px]"
+                                  >
+                                    <span className="truncate max-w-[140px]">{lead.website.replace(/^https?:\/\//, '')}</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                ) : (
+                                  <span className="text-slate-500 text-[11px]">{lead.emails || lead.phones || 'Registry Record'}</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
+                                {lead.priority_score || 88}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1068,7 +1443,7 @@ function CrawlerStepperContent() {
         {/* ============================================================ */}
         {/* CRAWLING HISTORY SECTION (CLICKABLE WITH URL QUERY REDIRECT) */}
         {/* ============================================================ */}
-        <div className={`p-6 rounded-2xl border space-y-4 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/60 border-slate-800'}`}>
+        <div className={`p-6 rounded-2xl border space-y-4 ${isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 backdrop-blur-xl border-slate-800'}`}>
           <div className="flex items-center justify-between border-b pb-3 border-slate-800/40">
             <div className="flex items-center gap-2">
               <History className="w-4 h-4 text-blue-400" />
@@ -1086,7 +1461,7 @@ function CrawlerStepperContent() {
           </div>
 
           <p className="text-xs text-slate-400">
-            Click any row to jump directly to the filtered trade leads harvested during that crawl run.
+            Click any row to jump directly to the filtered trade leads harvested during that crawl run, or click &quot;Clone Parameters&quot; to re-run.
           </p>
 
           <div className="overflow-x-auto">
@@ -1099,7 +1474,7 @@ function CrawlerStepperContent() {
                   <th className="py-2.5 px-2">Status</th>
                   <th className="py-2.5 px-2 text-right">Quota</th>
                   <th className="py-2.5 px-2 text-right">New / Merged</th>
-                  <th className="py-2.5 px-3 text-right">Action</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40">
@@ -1169,17 +1544,32 @@ function CrawlerStepperContent() {
                       </td>
 
                       <td className="py-3 px-3 text-right">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigateToLeadsFiltered(run);
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-xs font-semibold transition flex items-center gap-1 ml-auto"
-                        >
-                          <span>View Leads</span>
-                          <ArrowRight className="w-3 h-3" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            title="Export CSV"
+                            onClick={() => downloadCsvExport(run.job_id)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                          >
+                            <Download className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Clone and Re-run"
+                            onClick={() => cloneHistoricalRun(run)}
+                            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition"
+                          >
+                            Clone
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigateToLeadsFiltered(run)}
+                            className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-xs font-semibold transition flex items-center gap-1"
+                          >
+                            <span>Leads</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))

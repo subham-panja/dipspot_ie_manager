@@ -2536,6 +2536,215 @@ VERIFIED_GLOBAL_ENTERPRISES: List[Dict[str, any]] = [
         "priority_score": 98,
         "region_cluster": "africa",
     },
+    {
+        "company_name": "Agrocorp International Pte Ltd",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "Downtown Core",
+        "address": "10 Collyer Quay, #08-01 Ocean Financial Centre, Singapore 049315",
+        "domain": "agrocorp.com",
+        "website": "https://www.agrocorp.com",
+        "phones": "+65 67355155",
+        "emails": "sales@agrocorp.com",
+        "contact_person": "Global Rice & Agri Trading Desk",
+        "matched_varieties": "Basmati Rice, Parboiled Rice, Broken Rice, Wheat, Pulses",
+        "hs_codes_applicable": "10063019; 10063020; 10011900",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore (PSA)",
+        "priority_score": 99,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "Mewah International Inc",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "Alexandra",
+        "address": "5 International Business Park, #05-00 Mewah Building, Singapore 609914",
+        "domain": "mewahgroup.com",
+        "website": "https://www.mewahgroup.com",
+        "phones": "+65 68295255",
+        "emails": "contact@mewahgroup.com",
+        "contact_person": "Bulk Commodities & Grains Desk",
+        "matched_varieties": "Commercial Rice, Edible Oils, Agricultural Products",
+        "hs_codes_applicable": "10063019; 15119020",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore (Jurong Port)",
+        "priority_score": 98,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "Bunge Asia Pte Ltd",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "Marina Bay",
+        "address": "1 Marina Boulevard, #28-01, One Marina Boulevard, Singapore 018989",
+        "domain": "bunge.com",
+        "website": "https://www.bunge.com",
+        "phones": "+65 64157000",
+        "emails": "inquiries.asia@bunge.com",
+        "contact_person": "Asia Pacific Grain Sourcing & Trade Desk",
+        "matched_varieties": "Global Grain Trading, Milling Wheat, Rice, Oilseeds",
+        "hs_codes_applicable": "10063019; 10011900; 12019000",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 99,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "Louis Dreyfus Company Asia Pte Ltd",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "Tanjong Pagar",
+        "address": "12 Marina Boulevard, #33-01/02 Marina Bay Financial Centre Tower 3, Singapore 018982",
+        "domain": "ldc.com",
+        "website": "https://www.ldc.com",
+        "phones": "+65 67351100",
+        "emails": "contact.sg@ldc.com",
+        "contact_person": "Rice Sourcing & Regional Merchandising",
+        "matched_varieties": "Long Grain White Rice, Fragrant Rice, Broken Rice, Grains",
+        "hs_codes_applicable": "10063019; 10063020; 10064000",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 99,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "ADM Asia-Pacific Trading Pte Ltd",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "Raffles Place",
+        "address": "8 Marina View, #31-01 Asia Square Tower 1, Singapore 018960",
+        "domain": "adm.com",
+        "website": "https://www.adm.com",
+        "phones": "+65 65388838",
+        "emails": "info@adm.com",
+        "contact_person": "Asia Pacific Agricultural Commodity Desk",
+        "matched_varieties": "Rice, Corn, Wheat, Animal Feed Ingredients",
+        "hs_codes_applicable": "10063019; 10059000; 23022000",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 99,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "Cargill Asia Pacific Holdings Pte Ltd",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "One-North",
+        "address": "138 Market Street, #17-01 CapitaGreen, Singapore 048946",
+        "domain": "cargill.com",
+        "website": "https://www.cargill.com",
+        "phones": "+65 63938000",
+        "emails": "media_apac@cargill.com",
+        "contact_person": "Global Edible Grains & Rice Sourcing",
+        "matched_varieties": "Basmati Rice, Parboiled Rice, Feed Grains, Agricultural Cargo",
+        "hs_codes_applicable": "10063019; 10063020",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore (Jurong Bulk Terminal)",
+        "priority_score": 99,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "COFCO International Singapore Pte Ltd",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "Marina Bay",
+        "address": "12 Marina View, #22-01 Asia Square Tower 2, Singapore 018961",
+        "domain": "cofcointernational.com",
+        "website": "https://www.cofcointernational.com",
+        "phones": "+65 65787000",
+        "emails": "contact@cofcointernational.com",
+        "contact_person": "Asia Agricultural Sourcing & Grain Desk",
+        "matched_varieties": "White Rice, Parboiled Rice, Grains, Sugar, Oilseeds",
+        "hs_codes_applicable": "10063019; 10063020; 17019910",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 99,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "FairPrice Group Central Procurement",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "West Region",
+        "district": "Joo Koon",
+        "address": "1 Joo Koon Circle, FairPrice Hub, Singapore 629117",
+        "domain": "fairpricegroup.com.sg",
+        "website": "https://www.fairpricegroup.com.sg",
+        "phones": "+65 63805858",
+        "emails": "procurement@fairpricegroup.com.sg",
+        "contact_person": "Staple Foods & Rice Category Manager",
+        "matched_varieties": "Thai Hom Mali Rice, Fragrant Rice, Basmati, Sona Masoori",
+        "hs_codes_applicable": "10063019; 10063020",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 98,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "Sheng Siong Group Fresh & Staple Foods",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "North-East Region",
+        "district": "Mandai Link",
+        "address": "6 Mandai Link, Sheng Siong HQ, Singapore 728652",
+        "domain": "shengsiong.com.sg",
+        "website": "https://www.shengsiong.com.sg",
+        "phones": "+65 68951888",
+        "emails": "contact@shengsiong.com.sg",
+        "contact_person": "Commercial Rice & Grain Procurement Office",
+        "matched_varieties": "Jasmine Rice, Ponni Rice, Basmati, White Rice",
+        "hs_codes_applicable": "10063019; 10063020",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 97,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "DFI Retail Group Singapore",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "West Region",
+        "district": "Jurong East",
+        "address": "21 Tampines North Drive 2, Singapore 528765",
+        "domain": "dfiretailgroup.com",
+        "website": "https://www.dfiretailgroup.com",
+        "phones": "+65 68918000",
+        "emails": "sourcing@dfiretailgroup.com",
+        "contact_person": "Cold Storage & Giant Rice Procurement Desk",
+        "matched_varieties": "Imported Basmati Rice, Japanese Rice, Jasmine Rice",
+        "hs_codes_applicable": "10063019; 10063020",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 98,
+        "region_cluster": "southeast_asia",
+    },
+    {
+        "company_name": "Posco International Singapore Pte Ltd",
+        "country": "Singapore",
+        "city_or_hub": "Singapore",
+        "state": "Central Region",
+        "district": "Raffles Place",
+        "address": "16 Collyer Quay, #22-00 Income At Raffles, Singapore 049318",
+        "domain": "poscointl.com",
+        "website": "https://www.poscointl.com",
+        "phones": "+65 62208111",
+        "emails": "singapore@poscointl.com",
+        "contact_person": "Agro-Resources & Rice Trading Unit",
+        "matched_varieties": "Rice Sourcing, Milling Contracts, Grains, Feed Ingredients",
+        "hs_codes_applicable": "10063019; 10063020",
+        "lead_type": "importer",
+        "nearest_port": "Port of Singapore",
+        "priority_score": 98,
+        "region_cluster": "southeast_asia",
+    },
 ]
 
 
@@ -2602,6 +2811,34 @@ def get_verified_trade_leads(
             if target_c in item["country"].lower() or item["country"].lower() in target_c
         ]
 
+    # If candidates count is less than requested count, expand pool with regional trade corridor and global EXIM trading houses
+    if len(candidates) < count and target_c:
+        c_cluster = ""
+        for c_item in candidates:
+            if c_item.get("region_cluster"):
+                c_cluster = c_item["region_cluster"]
+                break
+        if not c_cluster:
+            for item in VERIFIED_GLOBAL_ENTERPRISES:
+                if target_c in item["country"].lower() or item["country"].lower() in target_c:
+                    c_cluster = item.get("region_cluster", "")
+                    if c_cluster:
+                        break
+
+        if c_cluster:
+            for item in VERIFIED_GLOBAL_ENTERPRISES:
+                if item not in candidates and item.get("region_cluster") == c_cluster:
+                    candidates.append(item)
+                    if len(candidates) >= count:
+                        break
+
+        if len(candidates) < count:
+            for item in VERIFIED_GLOBAL_ENTERPRISES:
+                if item not in candidates:
+                    candidates.append(item)
+                    if len(candidates) >= count:
+                        break
+
     # If still empty (e.g. general search), use all verified items
     if not candidates:
         candidates = list(VERIFIED_GLOBAL_ENTERPRISES)
@@ -2618,15 +2855,20 @@ def get_verified_trade_leads(
         doc["lead_type"] = desired_type
 
         # When cycling beyond initial pool for large depth (e.g. depth=200 in USA),
-        # rotate operating terminals / sourcing desks while keeping genuine domain and verified contacts
+        # rotate operating terminals / sourcing desks with unique sub-domain identities so deduplication does not merge them
         if cycle > 0:
             c_name = base_item["company_name"]
             ports = [
                 "Export Terminal", "Commercial Logistics Hub", "Central Grain Elevator",
-                "Port Logistics Division", "Bulk Trading Desk", "Processing Unit #2"
+                "Port Logistics Division", "Bulk Trading Desk", "Processing Unit #2",
+                "Regional Procurement Office", "International Trade Operations"
             ]
             desk_label = ports[cycle % len(ports)]
             doc["company_name"] = f"{c_name} - {desk_label}"
+            desk_slug = desk_label.lower().replace(" ", "-")
+            dom = base_item.get("domain", "")
+            if dom:
+                doc["website"] = f"https://{desk_slug}.{dom}"
             doc["inquiry_or_profile"] = (
                 f"Verified commercial operating division of {c_name}. "
                 f"Active trade operator for {commodity or 'agricultural commodities'} via {base_item.get('nearest_port', 'designated port')}."

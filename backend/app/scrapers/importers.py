@@ -393,11 +393,18 @@ def parse_go4worldbusiness_buyers_html(
         if not req_title or "Wanted" not in req_title:
             continue
 
+        item_url = link_el["href"]
+        if item_url.startswith("/"):
+            item_url = f"https://www.go4worldbusiness.com{item_url}"
+
         clean_item = re.sub(r"^Wanted\s*:\s*", "", req_title).strip()
-        comp_name = f"{clean_item} - Import Procurement Desk"
-        if comp_name in seen:
+        rfq_match = re.search(r"/view/(\d+)/", item_url)
+        rfq_tag = f" (RFQ #{rfq_match.group(1)})" if rfq_match else ""
+        comp_name = f"{clean_item} - Import Procurement Desk{rfq_tag}"
+        if comp_name in seen or item_url in seen:
             continue
         seen.add(comp_name)
+        seen.add(item_url)
 
         b_match = re.search(r"Buyer From\s+([A-Za-z\s]+?)(?:\||\n|\r|Quantity|$)", c_txt, re.I)
         b_country = b_match.group(1).strip() if b_match else target_country

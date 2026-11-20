@@ -728,7 +728,14 @@ class RealisticWebScraper:
             f"https://dir.indiamart.com/impcat/basmati-rice.html" if "rice" in slug else f"https://dir.indiamart.com/impcat/{slug}.html",
             f"https://dir.indiamart.com/impcat/non-basmati-rice.html" if "rice" in slug else f"https://dir.indiamart.com/impcat/{slug}.html",
         ]
-        self.log("REGISTRY", f"Connecting to IndiaMART Verified Directory for '{commodity}' in India", url=urls[0])
+        if depth > 15:
+            extra_categories = [
+                "1121-basmati-rice", "parboiled-rice", "swarna-rice", "ir-64-parboiled-rice",
+                "sella-basmati-rice", "paddy-rice", "broken-rice", "traditional-basmati-rice"
+            ] if "rice" in slug else ["agro-commodities", "grains", "food-products"]
+            for ec in extra_categories:
+                urls.append(f"https://dir.indiamart.com/impcat/{ec}.html")
+        self.log("REGISTRY", f"Connecting to IndiaMART Verified Directory for '{commodity}' in India ({len(urls)} categories)", url=urls[0])
         leads = []
         for u in urls:
             if len(leads) >= depth:
@@ -767,34 +774,55 @@ class RealisticWebScraper:
     ) -> List[Dict[str, any]]:
         """
         Directly crawls real international buyer RFQs or verified member suppliers from Go4WorldBusiness.
+        Supports multi-page crawling to satisfy large target depths (e.g. 50, 100, 200).
         """
         from app.scrapers.importers import parse_go4worldbusiness_buyers_html, parse_go4worldbusiness_suppliers_html
         is_imp = lead_type in ("importer", "importers", "buyer", "buyers")
         leads = []
         url = ""
+        pages_to_crawl = min(6, max(1, (depth // 15) + 1))
+
         if is_imp:
             q_str = f"{commodity} {target_c}" if target_c and target_c.lower() != "global" else commodity
-            url = f"https://www.go4worldbusiness.com/find?searchText={urllib.parse.quote_plus(q_str)}&buyers=true"
-            self.log("REGISTRY", f"Scraping Go4WorldBusiness Buyer RFQs for '{commodity}' in {target_c}", url=url)
-            html, status, lat = self.fetch_page(url, timeout=8.0, polite_jitter=True)
-            if not html or status != 200:
-                fallback_url = f"https://www.go4worldbusiness.com/find?searchText={urllib.parse.quote_plus(commodity)}&buyers=true"
-                html, status, lat = self.fetch_page(fallback_url, timeout=8.0, polite_jitter=True)
-                url = fallback_url
-            if html and status == 200:
-                leads = parse_go4worldbusiness_buyers_html(html, target_country=target_c, commodity=commodity, source_url=url)
+            for page in range(1, pages_to_crawl + 1):
+                if len(leads) >= depth:
+                    break
+                page_suffix = f"&page={page}" if page > 1 else ""
+                url = f"https://www.go4worldbusiness.com/find?searchText={urllib.parse.quote_plus(q_str)}&buyers=true{page_suffix}"
+                self.log("REGISTRY", f"Scraping Go4WorldBusiness Buyer RFQs (Page {page}) for '{commodity}' in {target_c}", url=url)
+                html, status, lat = self.fetch_page(url, timeout=8.0, polite_jitter=True)
+                if not html or status != 200:
+                    if page == 1:
+                        fallback_url = f"https://www.go4worldbusiness.com/find?searchText={urllib.parse.quote_plus(commodity)}&buyers=true"
+                        html, status, lat = self.fetch_page(fallback_url, timeout=8.0, polite_jitter=True)
+                        url = fallback_url
+                if html and status == 200:
+                    page_leads = parse_go4worldbusiness_buyers_html(html, target_country=target_c, commodity=commodity, source_url=url)
+                    for pl in page_leads:
+                        leads.append(pl)
+                        if len(leads) >= depth:
+                            break
         else:
             slug = (commodity or "rice").lower().replace(" ", "-")
             c_slug = (target_c or "india").lower().replace(" ", "-")
-            url = f"https://www.go4worldbusiness.com/suppliers/{c_slug}/{slug}.html"
-            self.log("REGISTRY", f"Scraping Go4WorldBusiness Verified Suppliers for '{commodity}' in {target_c}", url=url)
-            html, status, lat = self.fetch_page(url, timeout=8.0, polite_jitter=True)
-            if not html or status != 200:
-                fallback_url = f"https://www.go4worldbusiness.com/suppliers/{slug}.html"
-                html, status, lat = self.fetch_page(fallback_url, timeout=8.0, polite_jitter=True)
-                url = fallback_url
-            if html and status == 200:
-                leads = parse_go4worldbusiness_suppliers_html(html, target_country=target_c, commodity=commodity, source_url=url)
+            for page in range(1, pages_to_crawl + 1):
+                if len(leads) >= depth:
+                    break
+                page_suffix = f"?page={page}" if page > 1 else ""
+                url = f"https://www.go4worldbusiness.com/suppliers/{c_slug}/{slug}.html{page_suffix}"
+                self.log("REGISTRY", f"Scraping Go4WorldBusiness Verified Suppliers (Page {page}) for '{commodity}' in {target_c}", url=url)
+                html, status, lat = self.fetch_page(url, timeout=8.0, polite_jitter=True)
+                if not html or status != 200:
+                    if page == 1:
+                        fallback_url = f"https://www.go4worldbusiness.com/suppliers/{slug}.html"
+                        html, status, lat = self.fetch_page(fallback_url, timeout=8.0, polite_jitter=True)
+                        url = fallback_url
+                if html and status == 200:
+                    page_leads = parse_go4worldbusiness_suppliers_html(html, target_country=target_c, commodity=commodity, source_url=url)
+                    for pl in page_leads:
+                        leads.append(pl)
+                        if len(leads) >= depth:
+                            break
 
         if len(leads) < depth:
             from app.verified_catalog import get_verified_trade_leads

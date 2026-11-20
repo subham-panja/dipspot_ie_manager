@@ -41,6 +41,16 @@ COUNTRY_TO_ISO2: Dict[str, str] = {
     "india": "IN", "west bengal": "IN",
 }
 
+SHARED_PLATFORM_AND_DIRECTORY_DOMAINS = {
+    "indiamart.com", "go4worldbusiness.com", "tradeindia.com", "exportersindia.com",
+    "maps.google.com", "google.com", "kompass.com", "europages.com", "europages.co.uk",
+    "apeda.gov.in", "atninfo.com", "exportmandi.com", "tradekey.com", "volza.com",
+    "panjiva.com", "trademo.com", "importgenius.com", "hidubai.com", "yellowpages.com",
+    "justdial.com", "alibaba.com", "aliexpress.com", "ec21.com", "made-in-china.com",
+    "globalsources.com", "openstreetmap.org", "wikipedia.org", "facebook.com",
+    "linkedin.com", "instagram.com", "twitter.com", "x.com", "youtube.com", "github.com",
+}
+
 
 def normalize_deobfuscated_emails(raw_text: str) -> List[str]:
     if not raw_text:
@@ -219,11 +229,29 @@ def calculate_lead_similarity(
     def clean_dom(u: str) -> str:
         return (u or "").lower().replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].strip()
 
+    def clean_url_path(u: str) -> str:
+        raw = (u or "").lower().replace("https://", "").replace("http://", "").replace("www.", "").strip()
+        return raw.rstrip("/")
+
     c_dom = clean_dom(candidate.get("website") or "")
     e_dom = clean_dom(existing.get("website") or "")
     if c_dom and e_dom and c_dom == e_dom:
-        matching_fields.append("website")
-        return (98.5, f"Exact Web Domain match ({c_dom})", matching_fields)
+        if c_dom in SHARED_PLATFORM_AND_DIRECTORY_DOMAINS:
+            # Different company listings on a shared B2B directory or map service must not be merged.
+            # Only match if the canonical listing URL path is identical AND company names align.
+            c_path = clean_url_path(candidate.get("website") or "")
+            e_path = clean_url_path(existing.get("website") or "")
+            if c_path and e_path and c_path == e_path:
+                c_k = clean_company_key(candidate.get("company_name", ""))
+                e_k = clean_company_key(existing.get("company_name", ""))
+                sort_ratio = fuzz.token_sort_ratio(c_k, e_k) if (c_k and e_k) else 0
+                if sort_ratio >= 65:
+                    matching_fields.append("website")
+                    return (98.5, f"Exact Directory Listing match ({c_path})", matching_fields)
+        else:
+            # Private corporate domain match (e.g. krbl.com == krbl.com)
+            matching_fields.append("website")
+            return (98.5, f"Exact Web Domain match ({c_dom})", matching_fields)
 
     # 3. Phone Match (normalized digits)
     c_phones = re.sub(r"\D", "", candidate.get("phones") or "")

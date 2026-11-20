@@ -121,7 +121,7 @@ def search_google_maps_places(
         "Ginning & Cooperative Processing Plant",
     ]
 
-    count = max(1, min(limit, 100))
+    count = max(1, min(limit, 300))
 
     # Fetch verified genuine trade enterprises for the target country/commodity
     verified_leads = get_verified_trade_leads(
