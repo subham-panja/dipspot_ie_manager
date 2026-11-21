@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 from typing import Dict, List, Optional, Tuple
 import phonenumbers
 from email_validator import EmailNotValidError, validate_email
@@ -265,16 +266,19 @@ def clean_company_name(raw_name: str) -> str:
         r"\b(?:best\s+quality|cheap\s+price|at\s+cheap\s+price)\b",
         r"^(?:welcome\s+to\s+our|our\s+website|our\s+site|website)$",
     ]
-    has_corp_suffix = bool(re.search(r"\b(?:pvt|ltd|limited|llc|sarl|gmbh|inc|corp|corporation|co|fze|fzco|wll|sa)\b", low_full))
+    has_corp_suffix = bool(re.search(r"\b(?:pvt|ltd|limited|llc|sarl|gmbh|inc|corp|corporation|co|fze|fzco|wll|sa|sas|societe|société|compagnie|ets|etablissements|comptoir|centrale|union|cooperative|office)\b", low_full))
     for pat in GENERIC_CATEGORY_DISCARDS:
         if re.search(pat, low_full) and not any(sep in name for sep in ("|", " - ", " – ", " — ", "•", "·", "::")):
             if not has_corp_suffix:
                 return ""
 
-    # Strip parenthetical annotations like (Hooghly Cluster), (Foodstuff Wholesale), etc., unless legal form like (Pvt Ltd)
+    # Strip parenthetical annotations like (Hooghly Cluster), (Foodstuff Wholesale), etc., unless legal form or corporate acronym like (STCD), (Pvt Ltd)
     def clean_paren(match):
-        inner = match.group(1).lower()
-        if any(re.search(r"\b" + corp + r"\b", inner) for corp in ("pvt", "ltd", "llc", "sarl", "gmbh", "inc", "corp", "sa")):
+        raw_inner = match.group(1).strip()
+        inner = raw_inner.lower()
+        if any(re.search(r"\b" + corp + r"\b", inner) for corp in ("pvt", "ltd", "llc", "sarl", "gmbh", "inc", "corp", "sa", "sas", "co")):
+            return match.group(0)
+        if re.match(r"^[A-Za-z0-9]{2,6}$", raw_inner):
             return match.group(0)
         return ""
     name = re.sub(r"\s*\(([^)]+)\)", clean_paren, name).strip()
@@ -306,7 +310,7 @@ def clean_company_name(raw_name: str) -> str:
             return -100.0
 
         # Disqualify standalone trade category / SEO slogans if chunk lacks corporate suffix
-        if not re.search(r"\b(?:pvt|ltd|limited|llc|sarl|gmbh|inc|corp|corporation|co|fze|fzco|wll|sa)\b", c_low):
+        if not re.search(r"\b(?:pvt|ltd|limited|llc|sarl|gmbh|inc|corp|corporation|co|fze|fzco|wll|sa|sas|societe|société|compagnie|ets|etablissements|comptoir)\b", c_low):
             if any(re.search(pat, c_low) for pat in [
                 r"\b(?:exporters\s+(?:in|from)|suppliers\s+(?:in|from)|manufacturers\s+(?:in|from)|dealers\s+(?:in|from)|wholesalers\s+(?:in|from)|leading\s+exporter|top\s+exporter|leading\s+rice)\b",
                 r"\b(?:rice\s+exporters|rice\s+suppliers|rice\s+manufacturers|rice\s+millers|basmati\s+rice|non\s+basmati\s+rice)\b",
@@ -315,34 +319,40 @@ def clean_company_name(raw_name: str) -> str:
                 return -100.0
 
         score = 15.0
-        # Positive signals: Corporate suffixes
+        # Positive signals: Corporate suffixes and legal designations
         corp_suffixes = [
             r"\b(?:llc|l\.l\.c\.|ltd|limited|pvt|inc|corp|corporation)\b",
-            r"\b(?:sarl|s\.a\.r\.l\.|gmbh|b\.v\.|bv|sa|s\.a\.|pjsc|jsc)\b",
+            r"\b(?:sarl|s\.a\.r\.l\.|gmbh|b\.v\.|bv|sa|s\.a\.|pjsc|jsc|sas)\b",
             r"\b(?:wll|w\.l\.l\.|fze|fzco|dmcc|llp|est|establishment|spc)\b",
+            r"\b(?:societe|société|compagnie|ets|etablissements|comptoir|centrale|union|cooperative|office)\b",
         ]
+        has_chunk_corp = False
         for pat in corp_suffixes:
             if re.search(pat, c_low):
                 score += 50.0
+                has_chunk_corp = True
 
         corp_nouns = [
-            r"\b(?:group|holdings|enterprises|industries|trading|general\s+trading)\b",
+            r"\b(?:group|holdings|enterprises|industries|trading|general\s+trading|distribution|commerce|commercial)\b",
             r"\b(?:foods|foodstuff|foodstuffs|supermarket|supermarkets|hypermarket|cash\s*&\s*carry)\b",
-            r"\b(?:agro|mills|mill|millers|international|exports|imports|farms|logistics|terminal)\b",
+            r"\b(?:agro|mills|mill|millers|milling|complex|plant|elevator|silos?|international|exports|imports|farms|logistics|terminal|consortium|cooperative)\b",
         ]
+        has_trade_noun = False
         for pat in corp_nouns:
             if re.search(pat, c_low):
                 score += 35.0
+                has_trade_noun = True
 
-        # Preference for reasonable brand lengths (1-5 words, 4-40 chars)
-        if 1 <= len(words) <= 4:
+        # Preference for reasonable brand lengths (1-6 words, 4-55 chars)
+        has_biz_ident = has_chunk_corp or has_trade_noun
+        if 1 <= len(words) <= 5:
             score += 20.0
-        elif len(words) > 6:
+        elif len(words) > (9 if has_biz_ident else 6):
             score -= 25.0
 
-        if 4 <= len(chunk) <= 35:
+        if 4 <= len(chunk) <= (65 if has_biz_ident else 45):
             score += 15.0
-        elif len(chunk) > 55:
+        elif len(chunk) > (80 if has_biz_ident else 55):
             score -= 30.0
 
         # Proper casing
@@ -364,7 +374,7 @@ def clean_company_name(raw_name: str) -> str:
         for pat in GENERIC_CATEGORY_DISCARDS:
             if re.search(pat, single.lower()) and not has_corp_suffix:
                 return ""
-        if score_chunk(single) <= 15.0 or is_pure_generic_category(single):
+        if score_chunk(single) <= 0.0 or is_pure_generic_category(single):
             return ""
         return single
 
@@ -385,9 +395,11 @@ def clean_company_name(raw_name: str) -> str:
 
 def clean_company_key(name: str) -> str:
     cleaned = clean_company_name(name) if name else ""
-    n = (cleaned or name or "").lower()
+    raw = cleaned or name or ""
+    # Normalize unicode accents (e.g. Établissements -> Etablissements)
+    n = unicodedata.normalize("NFKD", raw).encode("ASCII", "ignore").decode("utf-8").lower()
     n = re.sub(
-        r"\b(pvt\.?|private|ltd\.?|limited|llc|l\.l\.c\.?|w\.l\.l\.?|wll|fze|fzco|dmcc|est\.?|co\.?|company|corp\.?|inc\.?|llp|m/s|uae|dubai|india)\b",
+        r"\b(pvt\.?|private|ltd\.?|limited|llc|l\.l\.c\.?|w\.l\.l\.?|wll|fze|fzco|dmcc|est\.?|co\.?|company|corp\.?|inc\.?|llp|m/s|sarl|s\.a\.r\.l\.?|sa|s\.a\.?|sas|gmbh|b\.v\.?|bv|pjsc|spc|ets\.?|etablissements?|tablissements?|uae|dubai|india)\b",
         " ",
         n,
     )
@@ -478,7 +490,18 @@ def calculate_lead_similarity(
             c_k = clean_company_key(candidate.get("company_name", ""))
             e_k = clean_company_key(existing.get("company_name", ""))
             sort_ratio = fuzz.token_sort_ratio(c_k, e_k) if (c_k and e_k) else 0
-            if not c_k or not e_k or sort_ratio >= 40:
+
+            # Check if proper nouns differ completely (e.g. distinct branch mills or divisions under same group)
+            w1 = set(c_k.split())
+            w2 = set(e_k.split())
+            d1 = w1 - w2
+            d2 = w2 - w1
+            if d1 and d2:
+                max_diff = max(fuzz.ratio(x, y) for x in d1 for y in d2)
+                if max_diff < 70.0:
+                    return (70.0, f"Shared domain ({c_dom}) across distinct facilities or divisions", matching_fields)
+
+            if not c_k or not e_k or sort_ratio >= 70:
                 matching_fields.append("website")
                 return (98.5, f"Exact Web Domain match ({c_dom})", matching_fields)
             return (70.0, f"Shared domain ({c_dom}) across distinct entities", matching_fields)
@@ -512,6 +535,16 @@ def calculate_lead_similarity(
 
         # Weighted composite score emphasizing complete token order and distinct proper names
         name_score = round(0.65 * sort_ratio + 0.25 * full_ratio + 0.10 * set_ratio, 1)
+
+        # Verify differing tokens: if distinct proper words differ substantially (< 75% similarity), they are separate entities
+        w1 = set(c_key.split())
+        w2 = set(e_key.split())
+        d1 = w1 - w2
+        d2 = w2 - w1
+        if d1 and d2:
+            max_diff_sim = max(fuzz.ratio(x, y) for x in d1 for y in d2)
+            if max_diff_sim < 85.0:
+                name_score = min(75.0, name_score)
 
         c_country = (candidate.get("country") or "").strip().lower()
         e_country = (existing.get("country") or "").strip().lower()

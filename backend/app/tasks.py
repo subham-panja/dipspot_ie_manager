@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from app.config import Config
-from app.lead_engine import clean_company_key, is_duplicate, calculate_lead_similarity, clean_company_name
+from app.lead_engine import clean_company_key, is_duplicate, calculate_lead_similarity, clean_company_name, is_pure_generic_category
 from app.models import Lead, ScrapeJob, db
 from app.sources import get_importer_sources, get_supplier_sources, IMPORTER_SOURCES, SUPPLIER_SOURCES
 from app.scrapers.importers import (
@@ -959,8 +959,8 @@ def _save_leads_with_dedup(
                     c_name = cleaned_c
                     item["company_name"] = cleaned_c
 
-            # Discard generic directory headlines (e.g. 'Rice Exporters in India')
-            if clean_company_name(c_name) == "" and not any(w in c_name for w in ("SARL", "LLC", "Ltd", "Trading", "Hub", "Terminal", "Facility")):
+            # Discard generic directory headlines (e.g. 'Rice Exporters in India', 'Wholesale Distribution Hub')
+            if is_pure_generic_category(c_name) or (clean_company_name(c_name) == "" and not any(w in c_name for w in ("SARL", "LLC", "Ltd", "Trading", "Co", "Corp", "SA", "SAS", "GmbH"))):
                 continue
 
             if not c_name or len(c_name) < 3:

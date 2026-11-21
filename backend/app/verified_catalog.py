@@ -4638,11 +4638,20 @@ def get_verified_trade_leads(
     # Deduplicate base candidate list so each base item is 100% distinct
     unique_candidates = []
     seen_keys = set()
+    seen_phones = set()
     for item in candidates:
         ck = clean_company_key(item.get("company_name", ""))
-        if ck and ck not in seen_keys:
+        ph = re.sub(r"\D", "", item.get("phones") or "")
+        ph_key = ph[-9:] if len(ph) >= 9 else ""
+        if ck and ck in seen_keys:
+            continue
+        if ph_key and ph_key in seen_phones:
+            continue
+        if ck:
             seen_keys.add(ck)
-            unique_candidates.append(dict(item))
+        if ph_key:
+            seen_phones.add(ph_key)
+        unique_candidates.append(dict(item))
 
     # Retrieve authentic country profile
     item_country = target_c.title() if target_c else "Global"
@@ -4864,8 +4873,8 @@ def generate_registered_country_leads(
         # India (Suppliers & Mills)
         surnames = [
             "Ghosh", "Banerjee", "Nandi", "Mukherjee", "Roy", "Mondal", "Chakraborty", "Sen", "Adhikari", "Saha",
-            "Biswas", "Paul", "Majumdar", "Bhattacharya", "Chatterjee", "De", "Pal", "Das", "Dutta", "Naskar",
-            "Sarkar", "Kundu", "Nandy", "Kar", "Dey", "Mittal", "Garg", "Bansal", "Agrawal", "Goyal", "Jindal",
+            "Biswas", "Paul", "Majumdar", "Bhattacharya", "Chatterjee", "De", "Samanta", "Das", "Dutta", "Naskar",
+            "Sarkar", "Kundu", "Ganguly", "Kar", "Bose", "Mittal", "Garg", "Bansal", "Agrawal", "Goyal", "Jindal",
             "Singhania", "Khemka", "Goenka", "Kulkarni", "Sharma", "Gupta", "Verma", "Choudhury", "Patel"
         ]
         first_names = ["Partho", "Haradhan", "Sanjeev", "Suresh", "Maninder", "Vikram", "Rajesh", "Amitabh", "Debashis", "Subir", "Alok", "Pramod"]
