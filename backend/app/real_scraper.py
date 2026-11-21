@@ -689,6 +689,10 @@ class RealisticWebScraper:
         address_snippet = ""
         contact_person = ""
         legal_name = ""
+        twitter_url = ""
+        linkedin_company_url = ""
+        facebook_url = ""
+        instagram_url = ""
 
         region_hint = "IN"
         if target_country:
@@ -787,6 +791,32 @@ class RealisticWebScraper:
                 if len(t_href) >= 7:
                     phones_found.append(t_href)
 
+            # Social Profile OSINT Extraction (inspired by theHarvester & Apify)
+            for a_tag in c_soup.find_all("a", href=True):
+                href = a_tag["href"].strip()
+                if not href:
+                    continue
+                # Twitter / X
+                if not twitter_url:
+                    tw_m = re.search(r"https?://(?:www\.)?(?:twitter\.com|x\.com)/([A-Za-z0-9_]{1,30})/?(?:$|[?#])", href, re.I)
+                    if tw_m and tw_m.group(1).lower() not in {"intent", "share", "widgets", "search", "home", "i", "privacy", "tos", "about"}:
+                        twitter_url = f"https://x.com/{tw_m.group(1)}"
+                # LinkedIn
+                if not linkedin_company_url:
+                    li_m = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/(?:company|in)/([A-Za-z0-9_\-\.%]+)/?(?:$|[?#])", href, re.I)
+                    if li_m and li_m.group(1).lower() not in {"share", "sharing", "help"}:
+                        linkedin_company_url = href.split("?")[0].rstrip("/")
+                # Facebook
+                if not facebook_url:
+                    fb_m = re.search(r"https?://(?:www\.)?facebook\.com/([A-Za-z0-9_\-\.%]+)/?(?:$|[?#])", href, re.I)
+                    if fb_m and fb_m.group(1).lower() not in {"sharer", "share.php", "plugins", "dialog", "privacy", "policies", "help"}:
+                        facebook_url = f"https://www.facebook.com/{fb_m.group(1)}"
+                # Instagram
+                if not instagram_url:
+                    ig_m = re.search(r"https?://(?:www\.)?instagram\.com/([A-Za-z0-9_\-\.%]+)/?(?:$|[?#])", href, re.I)
+                    if ig_m and ig_m.group(1).lower() not in {"p", "explore", "about", "developer", "terms", "privacy"}:
+                        instagram_url = f"https://www.instagram.com/{ig_m.group(1)}"
+
             em = normalize_deobfuscated_emails(raw_text)
             if em:
                 verified_em = filter_live_emails(em)
@@ -801,7 +831,11 @@ class RealisticWebScraper:
             if addr_match and not address_snippet:
                 address_snippet = addr_match.group(1).strip()
 
-            person_match = re.search(r"(?:Contact Person|Managing Director|Director|Contact Name|Purchase Manager|Owner):\s*([A-Za-z\s\.]{3,35})", raw_text, re.I)
+            person_match = re.search(
+                r"(?:Contact Person|Managing Director|Director|Contact Name|Purchase Manager|Owner):\s*([^:\n\r\|•·;]{2,35}?)(?=\s*(?:Office|Address|Location|Phone|Tel|Email|Headquarters)\s*:|\n|$|[\|•·;])",
+                raw_text,
+                re.I,
+            )
             if person_match and not contact_person:
                 contact_person = person_match.group(1).strip()
 
@@ -814,6 +848,10 @@ class RealisticWebScraper:
             "address": address_snippet,
             "contact_person": contact_person or "Commercial Trade Desk",
             "legal_name": legal_name,
+            "twitter_url": twitter_url,
+            "linkedin_company_url": linkedin_company_url,
+            "facebook_url": facebook_url,
+            "instagram_url": instagram_url,
         }
 
     def crawl_indiamart(
@@ -1026,6 +1064,10 @@ class RealisticWebScraper:
                 "source_url": dork_url,
                 "lead_type": lead_type,
                 "fssai_or_sfda_status": "Dork Search Verified",
+                "twitter_url": c_info.get("twitter_url", ""),
+                "facebook_url": c_info.get("facebook_url", ""),
+                "instagram_url": c_info.get("instagram_url", ""),
+                "linkedin_company_url": c_info.get("linkedin_company_url", ""),
             })
             if len(leads) >= depth:
                 break
@@ -1431,6 +1473,10 @@ class RealisticWebScraper:
                 "customs_manifest_data": f"Customs B/L Manifest (HS 100630) | Port: {target_port} | Regular 1-3 FCL Consignee",
                 "whatsapp_outreach_url": wa_url,
                 "linkedin_search_url": li_url,
+                "twitter_url": c_info.get("twitter_url", ""),
+                "facebook_url": c_info.get("facebook_url", ""),
+                "instagram_url": c_info.get("instagram_url", ""),
+                "linkedin_company_url": c_info.get("linkedin_company_url", ""),
                 "gstin": "",
                 "pan": "",
                 "fssai_or_sfda_status": f"{target_c} Registered Food Importer",
@@ -1843,6 +1889,10 @@ class RealisticWebScraper:
                 "latitude": 0.0,
                 "longitude": 0.0,
                 "nearest_port": f"{target_c} Commercial Gateway",
+                "twitter_url": c_info.get("twitter_url", ""),
+                "facebook_url": c_info.get("facebook_url", ""),
+                "instagram_url": c_info.get("instagram_url", ""),
+                "linkedin_company_url": c_info.get("linkedin_company_url", ""),
                 "gstin": "",
                 "pan": "",
                 "fssai_or_sfda_status": f"{target_c} Registered Operator",

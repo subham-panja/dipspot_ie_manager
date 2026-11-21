@@ -72,6 +72,10 @@ export interface CustomerLead {
   whatsapp_outreach_url?: string;
   linkedin_search_url?: string;
   google_maps_url?: string;
+  twitter_url?: string;
+  facebook_url?: string;
+  instagram_url?: string;
+  linkedin_company_url?: string;
   customs_manifest_data?: any;
 }
 
@@ -642,6 +646,36 @@ export default function CustomerDossier({
                           className="text-xs text-blue-400 hover:underline flex items-center gap-1"
                         >
                           <span className="truncate max-w-[180px]">{lead.website}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+
+                    {lead.twitter_url && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Twitter / X:</span>
+                        <a
+                          href={lead.twitter_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-sky-400 hover:underline flex items-center gap-1"
+                        >
+                          <span className="truncate max-w-[180px]">{lead.twitter_url.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+
+                    {lead.facebook_url && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Facebook Page:</span>
+                        <a
+                          href={lead.facebook_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+                        >
+                          <span className="truncate max-w-[180px]">{lead.facebook_url.replace(/^https?:\/\/(www\.)?/, '')}</span>
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>

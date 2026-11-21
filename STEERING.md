@@ -189,6 +189,11 @@ interface LeadDocument {
   hs_codes_applicable: string;         // e.g. "10063019; 10064000"
   lead_type: 'importer' | 'wb_mill';   // Strictly separated: importer (buyer) vs wb_mill (supplier)
   nearest_port: string;                // e.g. "Autonomous Port of Lome (TGLFW)"
+  shipment_volume?: string;            // e.g. "1-3 Containers / mo (25-75 MT)"
+  importer_tier?: string;              // e.g. "sme_importer"
+  twitter_url?: string;                // e.g. "https://x.com/company_handle"
+  facebook_url?: string;               // e.g. "https://www.facebook.com/company_page"
+  linkedin_company_url?: string;       // e.g. "https://www.linkedin.com/company/company-name"
   priority_score: number;              // 65 to 99
   source_name: string;                 // e.g. "Go4WorldBusiness Global Buyers Directory"
   source_url: string;                  // Direct canonical source URL
@@ -251,7 +256,7 @@ cd frontend && npm run dev
 Always run tests before committing code:
 ```bash
 # Run all core verification, strictness & government source tests
-PYTHONPATH=backend python3 -m pytest backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
+PYTHONPATH=backend python3 -m pytest backend/tests/test_crm_twenty_and_osint.py backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
 
 # Run frontend production build
 cd frontend && npm run build

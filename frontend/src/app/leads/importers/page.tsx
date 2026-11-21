@@ -32,6 +32,11 @@ import {
   Ship,
   Package,
   MessageCircle,
+  Trash2,
+  ArrowUpDown,
+  CheckSquare,
+  Square,
+  Save,
 } from 'lucide-react';
 
 interface Importer {
@@ -53,6 +58,7 @@ interface Importer {
   import_capacity_mt?: number;
   annual_turnover_usd?: string;
   lead_type: string;
+  deal_status?: string;
   verified_status: string;
   source_name?: string;
   source_url?: string;
@@ -67,6 +73,10 @@ interface Importer {
   whatsapp_outreach_url?: string;
   linkedin_search_url?: string;
   google_maps_url?: string;
+  twitter_url?: string;
+  facebook_url?: string;
+  instagram_url?: string;
+  linkedin_company_url?: string;
 }
 
 interface ImportersResponse {
@@ -108,10 +118,32 @@ function GlobalImportersContent() {
   const [tier, setTier] = useState(searchParams?.get('tier') || '');
   const [minScore, setMinScore] = useState<number | ''>('');
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('score_desc');
+
+  // Multi-Select Checkboxes (Twenty CRM Style)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Modals
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
   const [convertCustomer, setConvertCustomer] = useState<any | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [creatingLead, setCreatingLead] = useState(false);
+
+  const [newLeadForm, setNewLeadForm] = useState({
+    company_name: '',
+    country: 'United Arab Emirates',
+    city_or_hub: 'Dubai',
+    nearest_port: 'Jebel Ali Port (AEJEA)',
+    shipment_volume: '1-3 Containers / mo (25-75 MT)',
+    contact_person: '',
+    phones: '',
+    emails: '',
+    website: '',
+    matched_varieties: 'IR-64 Parboiled Rice; 1121 Basmati Rice',
+    address: '',
+    deal_status: 'unassigned',
+  });
+
   const [dealForm, setDealForm] = useState({
     title: '',
     commodity: 'IR-64 Parboiled Rice 5% Broken',
@@ -126,6 +158,7 @@ function GlobalImportersContent() {
       if (e.key === 'Escape') {
         setSelectedCustomer(null);
         setConvertCustomer(null);
+        setIsAddModalOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -138,6 +171,7 @@ function GlobalImportersContent() {
       const params = new URLSearchParams();
       params.append('page', String(pageNum));
       params.append('per_page', '15');
+      params.append('sort_by', sortBy);
       const effectiveCountry = country || urlCountry;
       if (effectiveCountry) params.append('country', effectiveCountry);
       if (port) params.append('port', port);
@@ -164,12 +198,132 @@ function GlobalImportersContent() {
 
   useEffect(() => {
     loadImporters(page);
-  }, [page, country, port, tier, minScore, urlCustomLabel, urlJobId, urlCountry]);
+  }, [page, country, port, tier, minScore, sortBy, urlCustomLabel, urlJobId, urlCountry]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
     loadImporters(1);
+  };
+
+  // Build Dynamic Filtered Export URL (CSV or JSON)
+  const buildExportUrl = (fmt = 'csv', selectedOnly = false) => {
+    const params = new URLSearchParams();
+    params.append('lead_type', 'importer');
+    params.append('format', fmt);
+    if (selectedOnly && selectedIds.size > 0) {
+      params.append('ids', Array.from(selectedIds).join(','));
+    } else {
+      const effectiveCountry = country || urlCountry;
+      if (effectiveCountry) params.append('country', effectiveCountry);
+      if (port) params.append('port', port);
+      if (tier) params.append('tier', tier);
+      if (minScore) params.append('min_score', String(minScore));
+      if (search.trim()) params.append('search', search.trim());
+      if (urlCustomLabel) params.append('custom_label', urlCustomLabel);
+      if (urlJobId) params.append('job_id', urlJobId);
+      params.append('sort_by', sortBy);
+    }
+    return `http://localhost:5001/api/leads/export/${fmt}?${params.toString()}`;
+  };
+
+  // Multi-Select Checkbox Handlers (Twenty CRM pattern)
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === importers.length && importers.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(importers.map((i) => i.id)));
+    }
+  };
+
+  const handleToggleSelectRow = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Bulk Actions
+  const handleBulkStatusUpdate = async (status: string) => {
+    if (selectedIds.size === 0) return;
+    try {
+      await fetchJson('/leads/bulk-update', {
+        method: 'POST',
+        body: JSON.stringify({
+          ids: Array.from(selectedIds),
+          deal_status: status,
+        }),
+      });
+      alert(`Updated ${selectedIds.size} leads to deal stage: ${status}`);
+      setSelectedIds(new Set());
+      loadImporters(page);
+    } catch (err: any) {
+      alert('Failed to bulk update: ' + err.message);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedIds.size} selected leads?`)) return;
+    try {
+      await fetchJson('/leads/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({
+          ids: Array.from(selectedIds),
+        }),
+      });
+      alert(`Successfully deleted ${selectedIds.size} leads`);
+      setSelectedIds(new Set());
+      loadImporters(page);
+    } catch (err: any) {
+      alert('Failed to bulk delete: ' + err.message);
+    }
+  };
+
+  // Manual Lead Creation
+  const handleCreateLeadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLeadForm.company_name.trim()) {
+      alert('Company legal name is required');
+      return;
+    }
+    try {
+      setCreatingLead(true);
+      await fetchJson('/leads', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...newLeadForm,
+          lead_type: 'importer',
+          priority_score: 92,
+        }),
+      });
+      alert(`Verified importer '${newLeadForm.company_name}' saved to directory!`);
+      setIsAddModalOpen(false);
+      setNewLeadForm({
+        company_name: '',
+        country: 'United Arab Emirates',
+        city_or_hub: 'Dubai',
+        nearest_port: 'Jebel Ali Port (AEJEA)',
+        shipment_volume: '1-3 Containers / mo (25-75 MT)',
+        contact_person: '',
+        phones: '',
+        emails: '',
+        website: '',
+        matched_varieties: 'IR-64 Parboiled Rice; 1121 Basmati Rice',
+        address: '',
+        deal_status: 'unassigned',
+      });
+      loadImporters(1);
+    } catch (err: any) {
+      alert('Failed to create lead: ' + err.message);
+    } finally {
+      setCreatingLead(false);
+    }
   };
 
   const handleConvertDealSubmit = async (e: React.FormEvent) => {
@@ -197,7 +351,7 @@ function GlobalImportersContent() {
     }
   };
 
-  // Scalable Page Left Navigation Items
+  // Sub-Navigation Items
   const navItems: PageSubNavItem[] = [
     {
       id: 'importers',
@@ -296,23 +450,45 @@ function GlobalImportersContent() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Add Manual Lead Button */}
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-sm transition"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Lead</span>
+          </button>
+
           <Link
             href="/crawler"
             className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
           >
             <Compass className="w-3.5 h-3.5 text-purple-400" />
-            <span>Discover More Leads</span>
+            <span>Crawler</span>
           </Link>
 
+          {/* Filtered Export Buttons */}
           <a
-            href="http://localhost:5001/api/leads/export/csv?lead_type=importer"
+            href={buildExportUrl('csv')}
             target="_blank"
             rel="noreferrer"
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+            title="Download CSV matching current filters"
           >
             <Download className="w-3.5 h-3.5 text-amber-400" />
             <span>Export CSV</span>
+          </a>
+
+          <a
+            href={buildExportUrl('json')}
+            target="_blank"
+            rel="noreferrer"
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+            title="Download JSON matching current filters"
+          >
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Export JSON</span>
           </a>
         </div>
       </div>
@@ -324,7 +500,7 @@ function GlobalImportersContent() {
         items={navItems}
         activeId="importers"
       >
-        {/* Importer Summary Metric Cards (Minimal) */}
+        {/* Importer Summary Metric Cards */}
         {aggregations && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
@@ -389,7 +565,7 @@ function GlobalImportersContent() {
           </div>
         )}
 
-        {/* Filter & Search Bar */}
+        {/* Multi-Filter & Search Bar (Twenty CRM Inspired) */}
         <div className={`p-3 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-3 ${
           isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 border-slate-800'
         }`}>
@@ -447,6 +623,22 @@ function GlobalImportersContent() {
               <option value="">All Consignment Sizes</option>
               <option value="sme">🎯 SME Importers (1-3 Containers / mo)</option>
             </select>
+
+            {/* Twenty-CRM Multi-Column Sort Dropdown */}
+            <select
+              value={sortBy}
+              onChange={(e) => { setSortBy(e.target.value); setPage(1); }}
+              className={`text-xs px-3 py-1.5 rounded-lg border outline-none font-medium ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-blue-400'
+              }`}
+            >
+              <option value="score_desc">Sort: Priority Score (High-Low)</option>
+              <option value="score_asc">Sort: Priority Score (Low-High)</option>
+              <option value="name_asc">Sort: Company Name (A - Z)</option>
+              <option value="name_desc">Sort: Company Name (Z - A)</option>
+              <option value="date_desc">Sort: Newest First</option>
+              <option value="volume_desc">Sort: Annual Volume High</option>
+            </select>
           </div>
 
           <form onSubmit={handleSearchSubmit} className="relative w-full md:w-72">
@@ -465,7 +657,72 @@ function GlobalImportersContent() {
           </form>
         </div>
 
-        {/* Importers Table */}
+        {/* Twenty-CRM Sticky Bulk Actions Toolbar */}
+        {selectedIds.size > 0 && (
+          <div className="sticky top-4 z-30 bg-slate-900 border border-blue-500/50 shadow-2xl rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-white animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                {selectedIds.size}
+              </span>
+              <span className="font-semibold">{selectedIds.size} Leads Selected</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={buildExportUrl('csv', true)}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 flex items-center gap-1 text-xs text-slate-200 transition"
+              >
+                <Download className="w-3.5 h-3.5 text-amber-400" />
+                <span>Export Selected (CSV)</span>
+              </a>
+
+              <a
+                href={buildExportUrl('json', true)}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 flex items-center gap-1 text-xs text-slate-200 transition"
+              >
+                <Download className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Export Selected (JSON)</span>
+              </a>
+
+              <select
+                onChange={(e) => {
+                  if (e.target.value) handleBulkStatusUpdate(e.target.value);
+                  e.target.value = '';
+                }}
+                defaultValue=""
+                className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 outline-none"
+              >
+                <option value="" disabled>Set Deal Stage...</option>
+                <option value="inquiry">Stage: Inquiry</option>
+                <option value="qualified">Stage: Qualified</option>
+                <option value="negotiation">Stage: Negotiation</option>
+                <option value="won">Stage: Contract Won</option>
+              </select>
+
+              <button
+                onClick={handleBulkDelete}
+                className="px-2.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded-lg border border-rose-500/40 flex items-center gap-1.5 text-xs transition"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Delete</span>
+              </button>
+
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="p-1.5 text-slate-400 hover:text-white transition"
+                title="Clear Selection"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Importers Table with Checkboxes & Multi-Column Sorting */}
         <div className={`rounded-xl overflow-hidden border shadow-sm transition ${
           isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
         }`}>
@@ -475,199 +732,259 @@ function GlobalImportersContent() {
                 <tr className={`border-b font-semibold tracking-wider uppercase text-[10px] ${
                   isLight ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-slate-950 text-slate-400 border-slate-800'
                 }`}>
-                  <th className="py-3 px-4">Importer Name</th>
-                  <th className="py-3 px-3">Port & Country</th>
+                  <th className="py-3 px-3 w-8 text-center">
+                    <input
+                      type="checkbox"
+                      checked={importers.length > 0 && selectedIds.size === importers.length}
+                      onChange={handleToggleSelectAll}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-500 cursor-pointer w-3.5 h-3.5"
+                    />
+                  </th>
+                  <th className="py-3 px-4 cursor-pointer select-none" onClick={() => setSortBy(sortBy === 'name_asc' ? 'name_desc' : 'name_asc')}>
+                    <div className="flex items-center gap-1">
+                      <span>Importer Name</span>
+                      <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3">Port &amp; Country</th>
                   <th className="py-3 px-3">Key Contact</th>
                   <th className="py-3 px-3">Direct Phone</th>
                   <th className="py-3 px-3">Target Goods</th>
-                  <th className="py-3 px-2 text-center">Score</th>
+                  <th className="py-3 px-2 text-center cursor-pointer select-none" onClick={() => setSortBy(sortBy === 'score_desc' ? 'score_asc' : 'score_desc')}>
+                    <div className="flex items-center justify-center gap-1">
+                      <span>Score</span>
+                      <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                    </div>
+                  </th>
                   <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                    <td colSpan={8} className="py-12 text-center text-slate-500">
                       <Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-500 mb-2" />
                       Loading verified buyers...
                     </td>
                   </tr>
                 ) : importers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                    <td colSpan={8} className="py-12 text-center text-slate-500">
                       No importers found matching criteria.
                     </td>
                   </tr>
                 ) : (
-                  importers.map((cust) => (
-                    <tr
-                      key={cust.id}
-                      className={`transition ${isLight ? 'hover:bg-slate-50' : 'hover:bg-slate-800/40'}`}
-                    >
-                      <td className="py-3 px-4">
-                        <div className="space-y-0.5">
-                          <div
-                            onClick={() => setSelectedCustomer(cust)}
-                            className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
-                              isLight ? 'text-slate-900 hover:text-blue-600' : 'text-white hover:text-blue-400'
-                            }`}
-                          >
-                            <Building2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                            <span>{cust.company_name}</span>
-                            <span title="Verified Trade Entity">
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                            </span>
-                          </div>
-                          {cust.shipment_volume && (
-                            <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-mono font-medium">
-                              <Ship className="w-2.5 h-2.5 shrink-0" />
-                              <span>{cust.shipment_volume}</span>
-                            </div>
-                          )}
-                          {cust.website && (
-                            <a
-                              href={cust.website.startsWith('http') ? cust.website : `https://${cust.website}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 font-mono"
+                  importers.map((cust) => {
+                    const isSelected = selectedIds.has(cust.id);
+                    return (
+                      <tr
+                        key={cust.id}
+                        className={`transition ${isSelected ? 'bg-blue-500/10' : (isLight ? 'hover:bg-slate-50' : 'hover:bg-slate-800/40')}`}
+                      >
+                        <td className="py-3 px-3 w-8 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectRow(cust.id)}
+                            className="rounded border-slate-700 bg-slate-900 text-blue-500 cursor-pointer w-3.5 h-3.5"
+                          />
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <div className="space-y-0.5">
+                            <div
+                              onClick={() => setSelectedCustomer(cust)}
+                              className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
+                                isLight ? 'text-slate-900 hover:text-blue-600' : 'text-white hover:text-blue-400'
+                              }`}
                             >
-                              <ExternalLink className="w-3 h-3" />
-                              <span className="truncate max-w-[180px]">{cust.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                            </a>
-                          )}
-                          {cust.custom_label && (
-                            <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
-                              <Tag className="w-2.5 h-2.5 text-slate-500" />
-                              <span>{cust.custom_label}</span>
+                              <Building2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span>{cust.company_name}</span>
+                              <span title="Verified Trade Entity">
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              </span>
                             </div>
-                          )}
-                        </div>
-                      </td>
 
-                      <td className="py-3 px-3 text-slate-400">
-                        <div className="font-medium text-slate-200">
-                          {cust.city ? `${cust.city}, ` : (cust.city_or_hub ? `${cust.city_or_hub}, ` : '')}{cust.country}
-                        </div>
-                        {cust.nearest_port && (
-                          <div className="text-[10px] text-cyan-400 font-mono flex items-center gap-1 mt-0.5 truncate max-w-[190px]" title={cust.nearest_port}>
-                            <Ship className="w-2.5 h-2.5 shrink-0" />
-                            <span className="truncate">{cust.nearest_port.split("(")[0].trim()}</span>
-                          </div>
-                        )}
-                        {cust.address && (
-                          <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={cust.address}>
-                            {cust.address}
-                          </div>
-                        )}
-                      </td>
+                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                              {cust.shipment_volume && (
+                                <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-mono font-medium">
+                                  <Ship className="w-2.5 h-2.5 shrink-0" />
+                                  <span>{cust.shipment_volume}</span>
+                                </div>
+                              )}
 
-                      <td className="py-3 px-3">
-                        <div className="font-medium text-slate-200">
-                          {cust.contact_person || 'Purchase Manager'}
-                        </div>
-                        {cust.linkedin_search_url && (
-                          <a
-                            href={cust.linkedin_search_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-[11px] text-[#0a66c2] hover:underline flex items-center gap-1 font-semibold mt-0.5"
-                            title="Find Purchase Manager on LinkedIn"
-                          >
-                            <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24">
-                              <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9v8.37H9.2V10.9H6.46M7.83 6.45a1.62 1.62 0 1 0 0 3.24 1.62 1.62 0 0 0 0-3.24Z" />
-                            </svg>
-                            <span>LinkedIn Profile</span>
-                          </a>
-                        )}
-                        {(cust.email || cust.emails) && (
-                          <a
-                            href={`mailto:${(cust.email || cust.emails || '').split(';')[0].trim()}`}
-                            className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[180px] mt-0.5"
-                          >
-                            <Mail className="w-3 h-3 text-slate-500 shrink-0" />
-                            <span className="truncate">{(cust.email || cust.emails || '').split(';')[0].trim()}</span>
-                          </a>
-                        )}
-                      </td>
+                              {/* Social OSINT Badges (theHarvester & Apify style) */}
+                              {cust.twitter_url && (
+                                <a
+                                  href={cust.twitter_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-sky-400 hover:text-sky-300 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 flex items-center gap-1"
+                                  title="Twitter / X Corporate Handle"
+                                >
+                                  <span>𝕏 Profile</span>
+                                </a>
+                              )}
 
-                      <td className="py-3 px-3 font-mono text-slate-300">
-                        {(cust.phone || cust.phones) ? (
-                          <div>
-                            <div className="flex items-center gap-1 text-[11px]">
-                              <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
-                              <span>{(cust.phone || cust.phones || '').split(';')[0].trim()}</span>
+                              {cust.linkedin_search_url && (
+                                <a
+                                  href={cust.linkedin_search_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-[#0a66c2] hover:underline font-bold bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 flex items-center gap-1"
+                                  title="Find Purchase Manager on LinkedIn"
+                                >
+                                  <span>in Search</span>
+                                </a>
+                              )}
+
+                              {cust.google_maps_url && (
+                                <a
+                                  href={cust.google_maps_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-emerald-400 hover:underline font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1"
+                                  title="View on Google Maps"
+                                >
+                                  <MapPin className="w-2.5 h-2.5" />
+                                  <span>Map POI</span>
+                                </a>
+                              )}
                             </div>
-                            {cust.whatsapp_outreach_url && (
+
+                            {cust.website && (
                               <a
-                                href={cust.whatsapp_outreach_url}
+                                href={cust.website.startsWith('http') ? cust.website : `https://${cust.website}`}
                                 target="_blank"
                                 rel="noreferrer"
                                 onClick={(e) => e.stopPropagation()}
-                                className="mt-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 shadow-sm transition w-fit font-sans"
-                                title="Message on WhatsApp with pre-filled CIF quote intro"
+                                className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 font-mono"
                               >
-                                <MessageCircle className="w-3 h-3 shrink-0" />
-                                <span>WhatsApp Buyer</span>
+                                <ExternalLink className="w-3 h-3" />
+                                <span className="truncate max-w-[180px]">{cust.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
                               </a>
                             )}
+                            {cust.custom_label && (
+                              <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                                <Tag className="w-2.5 h-2.5 text-slate-500" />
+                                <span>{cust.custom_label}</span>
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <span className="text-slate-600 text-[11px]">N/A</span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="py-3 px-3 text-slate-300 max-w-[200px]" title={cust.matched_varieties}>
-                        <div className="truncate font-medium">{cust.matched_varieties || 'Commodity Grains'}</div>
-                        {cust.hs_codes_applicable && (
-                          <div className="text-[10px] text-slate-500 font-mono">
-                            HS: {cust.hs_codes_applicable}
+                        <td className="py-3 px-3 text-slate-400">
+                          <div className="font-medium text-slate-200">
+                            {cust.city ? `${cust.city}, ` : (cust.city_or_hub ? `${cust.city_or_hub}, ` : '')}{cust.country}
                           </div>
-                        )}
-                      </td>
+                          {cust.nearest_port && (
+                            <div className="text-[10px] text-cyan-400 font-mono flex items-center gap-1 mt-0.5 truncate max-w-[190px]" title={cust.nearest_port}>
+                              <Ship className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">{cust.nearest_port.split("(")[0].trim()}</span>
+                            </div>
+                          )}
+                          {cust.address && (
+                            <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={cust.address}>
+                              {cust.address}
+                            </div>
+                          )}
+                        </td>
 
-                      <td className="py-3 px-2 text-center">
-                        <span className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
-                          cust.priority_score >= 80
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : cust.priority_score >= 60
-                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}>
-                          {cust.priority_score}
-                        </span>
-                        {(cust.merge_count || 1) > 1 && (
-                          <div className="text-[9px] text-blue-400 font-bold mt-0.5">
-                            Merged x{cust.merge_count}
+                        <td className="py-3 px-3">
+                          <div className="font-medium text-slate-200">
+                            {cust.contact_person || 'Purchase Manager'}
                           </div>
-                        )}
-                      </td>
+                          {(cust.email || cust.emails) && (
+                            <a
+                              href={`mailto:${(cust.email || cust.emails || '').split(';')[0].trim()}`}
+                              className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[180px] mt-0.5"
+                            >
+                              <Mail className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span className="truncate">{(cust.email || cust.emails || '').split(';')[0].trim()}</span>
+                            </a>
+                          )}
+                        </td>
 
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setSelectedCustomer(cust)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition"
-                          >
-                            Dossier
-                          </button>
-                          <button
-                            onClick={() => {
-                              setConvertCustomer(cust);
-                              setDealForm((prev) => ({
-                                ...prev,
-                                title: `500 MT Supply Contract - ${cust.company_name}`,
-                              }));
-                            }}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold text-white ${accentClasses.bg} shadow-sm transition`}
-                          >
-                            + Deal
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        <td className="py-3 px-3 font-mono text-slate-300">
+                          {(cust.phone || cust.phones) ? (
+                            <div>
+                              <div className="flex items-center gap-1 text-[11px]">
+                                <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                                <span>{(cust.phone || cust.phones || '').split(';')[0].trim()}</span>
+                              </div>
+                              {cust.whatsapp_outreach_url && (
+                                <a
+                                  href={cust.whatsapp_outreach_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="mt-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 shadow-sm transition w-fit font-sans"
+                                  title="Message on WhatsApp with pre-filled CIF quote intro"
+                                >
+                                  <MessageCircle className="w-3 h-3 shrink-0" />
+                                  <span>WhatsApp Buyer</span>
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-600 text-[11px]">N/A</span>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-3 text-slate-300 max-w-[200px]" title={cust.matched_varieties}>
+                          <div className="truncate font-medium">{cust.matched_varieties || 'Commodity Grains'}</div>
+                          {cust.hs_codes_applicable && (
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              HS: {cust.hs_codes_applicable}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-2 text-center">
+                          <span className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
+                            cust.priority_score >= 80
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : cust.priority_score >= 60
+                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {cust.priority_score}
+                          </span>
+                          {(cust.merge_count || 1) > 1 && (
+                            <div className="text-[9px] text-blue-400 font-bold mt-0.5">
+                              Merged x{cust.merge_count}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setSelectedCustomer(cust)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition"
+                            >
+                              Dossier
+                            </button>
+                            <button
+                              onClick={() => {
+                                setConvertCustomer(cust);
+                                setDealForm((prev) => ({
+                                  ...prev,
+                                  title: `500 MT Supply Contract - ${cust.company_name}`,
+                                }));
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold text-white ${accentClasses.bg} shadow-sm transition`}
+                            >
+                              + Deal
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -697,6 +1014,161 @@ function GlobalImportersContent() {
           </div>
         </div>
       </PageLeftNav>
+
+      {/* Manual Lead Creation Modal */}
+      {isAddModalOpen && (
+        <div
+          onClick={() => setIsAddModalOpen(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-lg rounded-2xl border p-6 shadow-2xl ${
+              isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
+            }`}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/40">
+              <h3 className={`text-base font-bold flex items-center gap-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                <Plus className="w-5 h-5 text-blue-400" />
+                Add Verified International Importer
+              </h3>
+              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateLeadSubmit} className="space-y-3 mt-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Company Legal Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Al-Futtaim Trading LLC"
+                  value={newLeadForm.company_name}
+                  onChange={(e) => setNewLeadForm({ ...newLeadForm, company_name: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Country</label>
+                  <input
+                    type="text"
+                    value={newLeadForm.country}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, country: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">City / Commercial Hub</label>
+                  <input
+                    type="text"
+                    value={newLeadForm.city_or_hub}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, city_or_hub: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Nearest Discharge Port</label>
+                  <input
+                    type="text"
+                    value={newLeadForm.nearest_port}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, nearest_port: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Monthly Inbound Volume</label>
+                  <input
+                    type="text"
+                    value={newLeadForm.shipment_volume}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, shipment_volume: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Key Contact Person</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Tariq Mansoor (Purchase Manager)"
+                    value={newLeadForm.contact_person}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, contact_person: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Phone Number</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. +971 4 295 1111"
+                    value={newLeadForm.phones}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, phones: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Verified Email</label>
+                  <input
+                    type="email"
+                    placeholder="e.g. trade@alfuttaim.ae"
+                    value={newLeadForm.emails}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, emails: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Corporate Website</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. www.alfuttaim.com"
+                    value={newLeadForm.website}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, website: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Commodity / Target Varieties</label>
+                <input
+                  type="text"
+                  value={newLeadForm.matched_varieties}
+                  onChange={(e) => setNewLeadForm({ ...newLeadForm, matched_varieties: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800/40">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingLead}
+                  className="px-5 py-2 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-500 shadow-md transition flex items-center gap-1.5"
+                >
+                  {creatingLead ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>{creatingLead ? 'Saving...' : 'Save Lead'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Convert to Deal Modal with Backdrop Click to Close */}
       {convertCustomer && (

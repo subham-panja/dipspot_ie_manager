@@ -29,12 +29,24 @@ CSV_EXPORT_FIELDS = [
     "address",
     "gstin",
     "pan",
+    "iec_code",
     "fssai_or_sfda_status",
     "district",
     "state",
     "matched_varieties",
     "hs_codes_applicable",
     "priority_score",
+    "deal_status",
+    "nearest_port",
+    "shipment_volume",
+    "importer_tier",
+    "customs_manifest_data",
+    "whatsapp_outreach_url",
+    "linkedin_search_url",
+    "google_maps_url",
+    "twitter_url",
+    "facebook_url",
+    "source_name",
     "source_url",
     "created_at",
 ]
@@ -202,6 +214,10 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "whatsapp_outreach_url": whatsapp_url,
         "linkedin_search_url": linkedin_url,
         "google_maps_url": gmaps_url,
+        "twitter_url": doc.get("twitter_url") or "",
+        "facebook_url": doc.get("facebook_url") or "",
+        "instagram_url": doc.get("instagram_url") or "",
+        "linkedin_company_url": doc.get("linkedin_company_url") or "",
         "source_name": doc.get("source_name") or "Global Verified Trade Directory",
         "source_url": doc.get("source_url") or "",
         "source_category": doc.get("source_category") or "Commercial Trade Manifest",
@@ -217,6 +233,19 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "created_at": str(doc.get("created_at") or ""),
         "updated_at": str(doc.get("updated_at") or ""),
     }
+
+
+def parse_sort_param(sort_param: str):
+    sort_map = {
+        "score_desc": [("priority_score", -1), ("_id", -1)],
+        "score_asc": [("priority_score", 1), ("_id", -1)],
+        "name_asc": [("company_name", 1), ("_id", -1)],
+        "name_desc": [("company_name", -1), ("_id", -1)],
+        "date_desc": [("_id", -1)],
+        "date_asc": [("_id", 1)],
+        "volume_desc": [("annual_volume_est", -1), ("priority_score", -1)],
+    }
+    return sort_map.get(sort_param, [("_id", -1)])
 
 
 def find_mongo_lead(mongo_db, lead_id):
@@ -290,9 +319,12 @@ def get_leads():
     skip = (page - 1) * per_page
     pages = (total + per_page - 1) // per_page if total > 0 else 0
 
+    sort_by = request.args.get("sort_by", "date_desc")
+    sort_order = parse_sort_param(sort_by)
+
     cursor = (
         mongo_db.leads.find(filter_q)
-        .sort([("_id", -1)])
+        .sort(sort_order)
         .skip(skip)
         .limit(per_page)
     )
@@ -376,9 +408,12 @@ def get_importers():
     skip = (page - 1) * per_page
     pages = (total + per_page - 1) // per_page if total > 0 else 0
 
+    sort_by = request.args.get("sort_by", "date_desc")
+    sort_order = parse_sort_param(sort_by)
+
     cursor = (
         mongo_db.leads.find(filter_q)
-        .sort([("_id", -1)])
+        .sort(sort_order)
         .skip(skip)
         .limit(per_page)
     )
@@ -473,9 +508,12 @@ def get_suppliers():
     skip = (page - 1) * per_page
     pages = (total + per_page - 1) // per_page if total > 0 else 0
 
+    sort_by = request.args.get("sort_by", "date_desc")
+    sort_order = parse_sort_param(sort_by)
+
     cursor = (
         mongo_db.leads.find(filter_q)
-        .sort([("_id", -1)])
+        .sort(sort_order)
         .skip(skip)
         .limit(per_page)
     )
@@ -545,7 +583,13 @@ def create_lead():
         "state": data.get("state", "").strip(),
         "district": data.get("district", "").strip(),
         "category_or_role": data.get("category_or_role", "").strip(),
-        "deal_status": "unassigned",
+        "nearest_port": data.get("nearest_port", "").strip(),
+        "shipment_volume": data.get("shipment_volume", "").strip(),
+        "importer_tier": data.get("importer_tier", "").strip(),
+        "custom_label": data.get("custom_label", "").strip(),
+        "twitter_url": data.get("twitter_url", "").strip(),
+        "linkedin_company_url": data.get("linkedin_company_url", "").strip(),
+        "deal_status": data.get("deal_status", "unassigned"),
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -820,51 +864,215 @@ def get_dashboard_stats():
 
 
 @api_bp.route("/leads/export", methods=["GET"])
-def export_leads_csv():
+@api_bp.route("/leads/export/<export_format>", methods=["GET"])
+def export_leads(export_format: str = "csv"):
+    """
+    Advanced filtered and multi-format export endpoint.
+    Supports CSV, JSON, and TSV formats.
+    Supports selective ID export via comma-separated 'ids' query parameter (Twenty CRM pattern).
+    Respects all active filter parameters (country, port, tier, score, search, etc.).
+    """
+    import json
     mongo_db = get_db()
-    filter_q = {}
+    fmt = (request.args.get("format") or export_format or "csv").lower().strip()
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    filter_q = {} if include_deleted else {"is_deleted": {"$ne": True}}
 
-    lead_type = request.args.get("lead_type")
-    if lead_type:
-        filter_q["lead_type"] = lead_type
+    # Selective ID export (for Twenty-style multi-select row checkboxes)
+    ids_param = request.args.get("ids", "").strip()
+    if ids_param:
+        id_tokens = [t.strip() for t in ids_param.split(",") if t.strip()]
+        id_conditions = []
+        for t in id_tokens:
+            try:
+                id_conditions.append({"id": int(t)})
+            except (ValueError, TypeError):
+                pass
+            id_conditions.append({"id": str(t)})
+            if ObjectId.is_valid(t):
+                id_conditions.append({"_id": ObjectId(t)})
+        if id_conditions:
+            filter_q["$or"] = id_conditions
+    else:
+        lead_type = request.args.get("lead_type")
+        if lead_type:
+            filter_q["lead_type"] = lead_type
 
-    job_id = request.args.get("job_id", type=int)
-    if job_id is not None:
-        filter_q["job_id"] = job_id
+        country = request.args.get("country")
+        if country:
+            filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
+        elif lead_type == "importer":
+            filter_q["country"] = {"$ne": "India"}
 
-    custom_label = request.args.get("custom_label")
-    if custom_label:
-        filter_q["custom_label"] = custom_label
+        city = request.args.get("city") or request.args.get("city_or_hub")
+        if city:
+            filter_q["city_or_hub"] = {"$regex": re.escape(city), "$options": "i"}
 
-    country = request.args.get("country")
-    if country:
-        filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
+        district = request.args.get("district")
+        if district:
+            filter_q["district"] = {"$regex": re.escape(district), "$options": "i"}
 
-    search = request.args.get("search")
-    if search:
-        s_regex = {"$regex": re.escape(search), "$options": "i"}
-        filter_q["$or"] = [
-            {"company_name": s_regex},
-            {"matched_varieties": s_regex},
-            {"city_or_hub": s_regex},
-        ]
+        state = request.args.get("state")
+        if state:
+            filter_q["state"] = {"$regex": re.escape(state), "$options": "i"}
 
-    cursor = mongo_db.leads.find(filter_q).sort([("priority_score", -1), ("_id", -1)])
+        port = request.args.get("port") or request.args.get("nearest_port")
+        if port:
+            filter_q["$or"] = [
+                {"nearest_port": {"$regex": re.escape(port), "$options": "i"}},
+                {"address": {"$regex": re.escape(port), "$options": "i"}},
+                {"city_or_hub": {"$regex": re.escape(port), "$options": "i"}},
+            ]
+
+        tier = request.args.get("tier") or request.args.get("importer_tier")
+        if tier:
+            if tier.lower() in ("sme", "sme_importer", "1-3"):
+                filter_q["importer_tier"] = "sme_importer"
+            else:
+                filter_q["importer_tier"] = {"$regex": re.escape(tier), "$options": "i"}
+
+        manifest_only = request.args.get("manifest_only", "").lower() == "true"
+        if manifest_only:
+            filter_q["customs_manifest_data"] = {"$exists": True, "$ne": ""}
+
+        deal_status = request.args.get("deal_status")
+        if deal_status:
+            filter_q["deal_status"] = deal_status
+
+        min_score = request.args.get("min_score", type=int)
+        if min_score is not None:
+            filter_q["priority_score"] = {"$gte": min_score}
+
+        custom_label = request.args.get("custom_label")
+        if custom_label:
+            filter_q["custom_label"] = {"$regex": re.escape(custom_label), "$options": "i"}
+
+        job_id = request.args.get("job_id", type=int)
+        if job_id is not None:
+            filter_q["job_id"] = job_id
+
+        search = request.args.get("search")
+        if search:
+            s_regex = {"$regex": re.escape(search), "$options": "i"}
+            s_cond = [
+                {"company_name": s_regex},
+                {"matched_varieties": s_regex},
+                {"city_or_hub": s_regex},
+                {"contact_person": s_regex},
+                {"emails": s_regex},
+                {"phones": s_regex},
+                {"address": s_regex},
+            ]
+            if "$or" in filter_q:
+                filter_q = {"$and": [filter_q, {"$or": s_cond}]}
+            else:
+                filter_q["$or"] = s_cond
+
+    sort_by = request.args.get("sort_by", "score_desc")
+    sort_order = parse_sort_param(sort_by)
+    cursor = mongo_db.leads.find(filter_q).sort(sort_order).limit(5000)
     leads = [serialize_mongo_lead(d) for d in cursor]
 
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=CSV_EXPORT_FIELDS, extrasaction="ignore")
-    writer.writeheader()
+    lead_type_label = request.args.get("lead_type") or "all"
+    if fmt == "json":
+        return Response(
+            json.dumps(leads, indent=2),
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment; filename=trade_leads_{lead_type_label}.json"},
+        )
+    elif fmt == "tsv":
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=CSV_EXPORT_FIELDS, extrasaction="ignore", delimiter="\t")
+        writer.writeheader()
+        for lead in leads:
+            writer.writerow(lead)
+        return Response(
+            output.getvalue(),
+            mimetype="text/tab-separated-values",
+            headers={"Content-Disposition": f"attachment; filename=trade_leads_{lead_type_label}.tsv"},
+        )
+    else:  # csv
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=CSV_EXPORT_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for lead in leads:
+            writer.writerow(lead)
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=trade_leads_{lead_type_label}.csv"},
+        )
 
-    for lead in leads:
-        writer.writerow(lead)
 
-    filename = f"trade_leads_{lead_type or 'all'}.csv"
-    return Response(
-        output.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+@api_bp.route("/leads/bulk-update", methods=["POST"])
+def bulk_update_leads():
+    """Batch updates status or attributes across multiple leads in one atomic operation."""
+    mongo_db = get_db()
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    updates = data.get("updates") or {}
+    for k in ["deal_status", "importer_tier", "custom_label", "priority_score", "risk_tier", "stage_id"]:
+        if k in data and k not in updates:
+            updates[k] = data[k]
+
+    if not ids or not updates:
+        return jsonify({"error": "ids and updates are required"}), 400
+
+    id_conditions = []
+    for i in ids:
+        try:
+            id_conditions.append({"id": int(i)})
+        except (ValueError, TypeError):
+            pass
+        id_conditions.append({"id": str(i)})
+        if ObjectId.is_valid(str(i)):
+            id_conditions.append({"_id": ObjectId(str(i))})
+
+    updates["updated_at"] = now_iso()
+    result = mongo_db.leads.update_many({"$or": id_conditions}, {"$set": updates})
+    return jsonify({
+        "success": True,
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
+        "message": f"Successfully updated {result.modified_count} leads",
+    })
+
+
+@api_bp.route("/leads/bulk-delete", methods=["POST"])
+def bulk_delete_leads():
+    """Batch soft-deletes (or permanently deletes) multiple leads in one atomic operation."""
+    mongo_db = get_db()
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    permanent = bool(data.get("permanent", False))
+    if not ids:
+        return jsonify({"error": "ids is required"}), 400
+
+    id_conditions = []
+    for i in ids:
+        try:
+            id_conditions.append({"id": int(i)})
+        except (ValueError, TypeError):
+            pass
+        id_conditions.append({"id": str(i)})
+        if ObjectId.is_valid(str(i)):
+            id_conditions.append({"_id": ObjectId(str(i))})
+
+    if permanent:
+        result = mongo_db.leads.delete_many({"$or": id_conditions})
+        count = result.deleted_count
+    else:
+        result = mongo_db.leads.update_many(
+            {"$or": id_conditions},
+            {"$set": {"is_deleted": True, "deleted_at": now_iso()}}
+        )
+        count = result.modified_count
+
+    return jsonify({
+        "success": True,
+        "deleted_count": count,
+        "message": f"Successfully {'permanently deleted' if permanent else 'soft-deleted'} {count} leads",
+    })
 
 
 @api_bp.route("/crawler/history", methods=["GET"])

@@ -28,6 +28,10 @@ import {
   Mail,
   Filter,
   Tag,
+  Plus,
+  Trash2,
+  ArrowUpDown,
+  Save,
 } from 'lucide-react';
 
 interface SuppliersApiResponse {
@@ -65,7 +69,11 @@ function VerifiedSuppliersContent() {
   const [commodity, setCommodity] = useState('');
   const [search, setSearch] = useState('');
   const [minScore, setMinScore] = useState<number | ''>('');
+  const [sortBy, setSortBy] = useState('score_desc');
   const [loading, setLoading] = useState(true);
+
+  // Multi-Select Checkboxes (Twenty CRM Style)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Customer Dossier view
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
@@ -81,12 +89,32 @@ function VerifiedSuppliersContent() {
     stage_id: 'inquiry',
   });
 
+  // Manual Supplier Creation Modal
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [creatingLead, setCreatingLead] = useState(false);
+  const [newSupplierForm, setNewSupplierForm] = useState({
+    company_name: '',
+    country: 'India',
+    state: 'West Bengal',
+    district: 'Burdwan',
+    city_or_hub: 'Burdwan Agro Cluster',
+    contact_person: '',
+    phones: '',
+    emails: '',
+    website: '',
+    gstin: '',
+    matched_varieties: 'Sortex IR-64 Parboiled Rice; Swarna Raw Rice',
+    address: '',
+    deal_status: 'unassigned',
+  });
+
   // Universal Escape key closes modals
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelectedCustomer(null);
         setConvertCustomer(null);
+        setIsAddModalOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -105,6 +133,7 @@ function VerifiedSuppliersContent() {
       if (urlCountry) params.append('country', urlCountry);
       if (urlCustomLabel) params.append('custom_label', urlCustomLabel);
       if (urlJobId) params.append('job_id', urlJobId);
+      params.append('sort_by', sortBy);
       params.append('page', String(page));
       params.append('per_page', '15');
 
@@ -122,7 +151,7 @@ function VerifiedSuppliersContent() {
 
   useEffect(() => {
     loadSuppliers();
-  }, [district, state, commodity, minScore, page, urlCustomLabel, urlJobId, urlCountry]);
+  }, [district, state, commodity, minScore, sortBy, page, urlCustomLabel, urlJobId, urlCountry]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,7 +165,130 @@ function VerifiedSuppliersContent() {
     setCommodity('');
     setSearch('');
     setMinScore('');
+    setSortBy('score_desc');
     setPage(1);
+  };
+
+  // Build Dynamic Filtered Export URL (CSV or JSON)
+  const buildExportUrl = (fmt = 'csv', selectedOnly = false) => {
+    const params = new URLSearchParams();
+    params.append('lead_type', 'wb_mill');
+    params.append('format', fmt);
+    if (selectedOnly && selectedIds.size > 0) {
+      params.append('ids', Array.from(selectedIds).join(','));
+    } else {
+      if (district) params.append('district', district);
+      if (state) params.append('state', state);
+      if (commodity) params.append('commodity', commodity);
+      if (search) params.append('search', search);
+      if (minScore !== '') params.append('min_score', String(minScore));
+      if (urlCountry) params.append('country', urlCountry);
+      if (urlCustomLabel) params.append('custom_label', urlCustomLabel);
+      if (urlJobId) params.append('job_id', urlJobId);
+      params.append('sort_by', sortBy);
+    }
+    return `http://localhost:5001/api/leads/export/${fmt}?${params.toString()}`;
+  };
+
+  // Multi-Select Checkboxes Handlers
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === suppliers.length && suppliers.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(suppliers.map((s) => s.id)));
+    }
+  };
+
+  const handleToggleSelectRow = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Bulk Actions
+  const handleBulkStatusUpdate = async (status: string) => {
+    if (selectedIds.size === 0) return;
+    try {
+      await fetchJson('/leads/bulk-update', {
+        method: 'POST',
+        body: JSON.stringify({
+          ids: Array.from(selectedIds),
+          deal_status: status,
+        }),
+      });
+      alert(`Updated ${selectedIds.size} suppliers to status: ${status}`);
+      setSelectedIds(new Set());
+      loadSuppliers();
+    } catch (err: any) {
+      alert('Failed to bulk update: ' + err.message);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedIds.size} selected suppliers?`)) return;
+    try {
+      await fetchJson('/leads/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({
+          ids: Array.from(selectedIds),
+        }),
+      });
+      alert(`Successfully deleted ${selectedIds.size} suppliers`);
+      setSelectedIds(new Set());
+      loadSuppliers();
+    } catch (err: any) {
+      alert('Failed to bulk delete: ' + err.message);
+    }
+  };
+
+  // Manual Supplier Creation
+  const handleCreateSupplierSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSupplierForm.company_name.trim()) {
+      alert('Supplier facility name is required');
+      return;
+    }
+    try {
+      setCreatingLead(true);
+      await fetchJson('/leads', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...newSupplierForm,
+          lead_type: 'wb_mill',
+          priority_score: 94,
+        }),
+      });
+      alert(`Verified processing mill '${newSupplierForm.company_name}' registered!`);
+      setIsAddModalOpen(false);
+      setNewSupplierForm({
+        company_name: '',
+        country: 'India',
+        state: 'West Bengal',
+        district: 'Burdwan',
+        city_or_hub: 'Burdwan Agro Cluster',
+        contact_person: '',
+        phones: '',
+        emails: '',
+        website: '',
+        gstin: '',
+        matched_varieties: 'Sortex IR-64 Parboiled Rice; Swarna Raw Rice',
+        address: '',
+        deal_status: 'unassigned',
+      });
+      setPage(1);
+      loadSuppliers();
+    } catch (err: any) {
+      alert('Failed to create supplier: ' + err.message);
+    } finally {
+      setCreatingLead(false);
+    }
   };
 
   const openConvertModal = (lead: any) => {
@@ -167,7 +319,7 @@ function VerifiedSuppliersContent() {
     }
   };
 
-  // Scalable Page Left Navigation Items
+  // Sub-Navigation Items
   const navItems: PageSubNavItem[] = [
     {
       id: 'importers',
@@ -226,21 +378,45 @@ function VerifiedSuppliersContent() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Add Supplier Button */}
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-sm transition"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Supplier</span>
+          </button>
+
           <Link
             href="/crawler"
             className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
           >
             <Compass className="w-3.5 h-3.5 text-purple-400" />
-            <span>Crawl New Suppliers</span>
+            <span>Crawl New</span>
           </Link>
 
+          {/* Filtered Export Buttons */}
           <a
-            href={`${API_BASE}/leads/export?lead_type=wb_mill&district=${district}`}
+            href={buildExportUrl('csv')}
+            target="_blank"
+            rel="noreferrer"
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition"
+            title="Download CSV matching current filters"
           >
             <Download className="w-3.5 h-3.5 text-emerald-400" />
             <span>Export CSV</span>
+          </a>
+
+          <a
+            href={buildExportUrl('json')}
+            target="_blank"
+            rel="noreferrer"
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition"
+            title="Download JSON matching current filters"
+          >
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Export JSON</span>
           </a>
         </div>
       </div>
@@ -258,41 +434,41 @@ function VerifiedSuppliersContent() {
             <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
               <div className="text-slate-400 text-xs">Total Producers</div>
               <div className="text-xl font-bold text-emerald-400 mt-1">{aggregations.total_suppliers}</div>
-              <div className="text-[10px] text-slate-500">Commercial facilities</div>
+              <div className="text-[10px] text-slate-500">Verified processing units</div>
             </div>
 
             <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <div className="text-slate-400 text-xs">GST Compliant</div>
+              <div className="text-slate-400 text-xs">GSTIN Tax Compliant</div>
               <div className="text-xl font-bold text-blue-400 mt-1">{aggregations.verified_gst_count}</div>
-              <div className="text-[10px] text-slate-500">Verified trade tax IDs</div>
+              <div className="text-[10px] text-slate-500">Active GST verification</div>
             </div>
 
             <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <div className="text-slate-400 text-xs">Production Clusters</div>
-              <div className="text-xl font-bold text-amber-400 mt-1">{aggregations.top_districts?.length || 0} Districts</div>
-              <div className="text-[10px] text-slate-500">Eastern & Northern hubs</div>
+              <div className="text-slate-400 text-xs">Production Hubs</div>
+              <div className="text-xl font-bold text-white mt-1">{aggregations.top_districts.length} Districts</div>
+              <div className="text-[10px] text-slate-500">Industrial agro zones</div>
             </div>
 
             <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <div className="text-slate-400 text-xs">Primary Hub</div>
-              <div className="text-sm font-bold text-purple-400 mt-1.5 truncate">
-                {aggregations.top_districts?.[0]?.district || 'Burdwan'}
+              <div className="text-slate-400 text-xs">Top Production Cluster</div>
+              <div className="text-sm font-bold text-slate-200 mt-1.5 truncate">
+                {aggregations.top_districts[0]?.district || 'Burdwan'}
               </div>
               <div className="text-[10px] text-slate-500">
-                {aggregations.top_districts?.[0]?.count || 0} operating plants
+                {aggregations.top_districts[0]?.count || 0} registered facilities
               </div>
             </div>
           </div>
         )}
 
-        {/* Active Crawl Filter Banner */}
+        {/* Active Filter from Crawl Run Banner */}
         {(urlCustomLabel || urlJobId || urlCountry) && (
-          <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-indigo-400">
+          <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-emerald-400">
             <div className="flex flex-wrap items-center gap-2">
-              <Filter className="w-4 h-4 text-indigo-400 shrink-0" />
+              <Filter className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="font-semibold text-slate-200">Active Crawl Filter:</span>
               {urlCustomLabel && (
-                <span className="font-bold text-white bg-indigo-500/25 px-2.5 py-0.5 rounded border border-indigo-500/30">
+                <span className="font-bold text-white bg-emerald-500/25 px-2.5 py-0.5 rounded border border-emerald-500/30">
                   {urlCustomLabel}
                 </span>
               )}
@@ -303,7 +479,7 @@ function VerifiedSuppliersContent() {
               )}
               {urlCountry && (
                 <span className="text-slate-300">
-                  &bull; Geography: <strong className="text-white">{urlCountry}</strong>
+                  &bull; Origin: <strong className="text-white">{urlCountry}</strong>
                 </span>
               )}
             </div>
@@ -317,79 +493,162 @@ function VerifiedSuppliersContent() {
           </div>
         )}
 
-        {/* Filter Toolbar */}
-        <div className={`p-3 rounded-xl border transition-colors ${
+        {/* Multi-Filter & Search Bar */}
+        <div className={`p-3 rounded-xl border flex flex-col md:flex-row items-center justify-between gap-3 ${
           isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-900/70 border-slate-800'
         }`}>
-          <form onSubmit={handleSearchSubmit} className="flex flex-col md:flex-row gap-2.5">
-            <div className="flex-1 relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search supplier by name, GSTIN, district..."
-                className={`w-full text-xs pl-8 pr-3 py-1.5 rounded-lg border outline-none ${
-                  isLight
-                    ? 'bg-slate-50 border-slate-200 text-slate-900 focus:border-emerald-500'
-                    : 'bg-slate-950 border-slate-800 text-slate-100 focus:border-emerald-500'
-                }`}
-              />
-            </div>
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto flex-1">
+            <select
+              value={district}
+              onChange={(e) => { setDistrict(e.target.value); setPage(1); }}
+              className={`text-xs px-3 py-1.5 rounded-lg border outline-none ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-slate-200'
+              }`}
+            >
+              <option value="">All Production Clusters</option>
+              <option value="Burdwan">Burdwan (Purba / Paschim)</option>
+              <option value="Hooghly">Hooghly Milling Corridor</option>
+              <option value="Birbhum">Birbhum Agro Basin</option>
+              <option value="Midnapore">Midnapore / Haldia Port</option>
+              <option value="Bankura">Bankura Grain Terminal</option>
+              <option value="Nadia">Nadia Border Access</option>
+            </select>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={district}
-                onChange={(e) => { setDistrict(e.target.value); setPage(1); }}
-                className={`text-xs px-2.5 py-1.5 rounded-lg border outline-none ${
-                  isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-slate-300'
-                }`}
-              >
-                <option value="">All Production Hubs</option>
-                <option value="Burdwan">Burdwan (Purba / Paschim)</option>
-                <option value="Hooghly">Hooghly Belt</option>
-                <option value="Nadia">Nadia Zone</option>
-                <option value="Birbhum">Birbhum Agro Cluster</option>
-                <option value="Kolkata">Kolkata Logistics Port</option>
-              </select>
+            <select
+              value={commodity}
+              onChange={(e) => { setCommodity(e.target.value); setPage(1); }}
+              className={`text-xs px-3 py-1.5 rounded-lg border outline-none ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-slate-200'
+              }`}
+            >
+              <option value="">All Commodity Specialties</option>
+              <option value="IR-64">IR-64 Parboiled Non-Basmati</option>
+              <option value="Swarna">Swarna Premium Milled</option>
+              <option value="Minikit">Minikit Super Fine</option>
+              <option value="Basmati">1121 &amp; Traditional Basmati</option>
+              <option value="Sortex">Sortex Cleaned Ready Units</option>
+            </select>
 
-              <select
-                value={commodity}
-                onChange={(e) => { setCommodity(e.target.value); setPage(1); }}
-                className={`text-xs px-2.5 py-1.5 rounded-lg border outline-none ${
-                  isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-slate-300'
-                }`}
-              >
-                <option value="">All Commodities</option>
-                <option value="Swarna">Swarna Parboiled</option>
-                <option value="Minikit">Minikit Rice</option>
-                <option value="Basmati">Basmati 1121/1509</option>
-                <option value="Non-Basmati">Non-Basmati Commercial</option>
-                <option value="Wheat">Wheat & Flour</option>
-              </select>
+            <select
+              value={minScore}
+              onChange={(e) => { setMinScore(e.target.value ? Number(e.target.value) : ''); setPage(1); }}
+              className={`text-xs px-3 py-1.5 rounded-lg border outline-none ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-slate-200'
+              }`}
+            >
+              <option value="">All Quality Scores</option>
+              <option value="80">Score 80+ (Tier 1 Certified)</option>
+              <option value="60">Score 60+ (Active)</option>
+            </select>
 
+            {/* Twenty-CRM Multi-Column Sort Dropdown */}
+            <select
+              value={sortBy}
+              onChange={(e) => { setSortBy(e.target.value); setPage(1); }}
+              className={`text-xs px-3 py-1.5 rounded-lg border outline-none font-medium ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-emerald-400'
+              }`}
+            >
+              <option value="score_desc">Sort: Quality Score (High-Low)</option>
+              <option value="score_asc">Sort: Quality Score (Low-High)</option>
+              <option value="name_asc">Sort: Facility Name (A - Z)</option>
+              <option value="name_desc">Sort: Facility Name (Z - A)</option>
+              <option value="date_desc">Sort: Newest Registered First</option>
+            </select>
+
+            {(district || state || commodity || minScore || search) && (
               <button
-                type="submit"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg text-white ${accentClasses.bg}`}
+                type="button"
+                onClick={handleResetFilters}
+                className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 font-semibold ml-1"
               >
-                Apply
+                <X className="w-3.5 h-3.5" /> Reset
               </button>
+            )}
+          </div>
 
-              {(district || state || commodity || search || minScore !== '') && (
-                <button
-                  type="button"
-                  onClick={handleResetFilters}
-                  className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1.5 flex items-center gap-1"
-                >
-                  <X className="w-3 h-3" />
-                  <span>Reset</span>
-                </button>
-              )}
-            </div>
+          <form onSubmit={handleSearchSubmit} className="relative w-full md:w-72">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by facility, contact, GSTIN..."
+              className={`w-full text-xs pl-8 pr-3 py-1.5 rounded-lg border outline-none ${
+                isLight
+                  ? 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-500'
+                  : 'bg-slate-950 border-slate-800 text-slate-200 focus:border-emerald-500'
+              }`}
+            />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
           </form>
         </div>
 
-        {/* Suppliers Table */}
+        {/* Twenty-CRM Sticky Bulk Actions Toolbar */}
+        {selectedIds.size > 0 && (
+          <div className="sticky top-4 z-30 bg-slate-900 border border-emerald-500/50 shadow-2xl rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-white animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                {selectedIds.size}
+              </span>
+              <span className="font-semibold">{selectedIds.size} Suppliers Selected</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={buildExportUrl('csv', true)}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 flex items-center gap-1 text-xs text-slate-200 transition"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Export Selected (CSV)</span>
+              </a>
+
+              <a
+                href={buildExportUrl('json', true)}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 flex items-center gap-1 text-xs text-slate-200 transition"
+              >
+                <Download className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Export Selected (JSON)</span>
+              </a>
+
+              <select
+                onChange={(e) => {
+                  if (e.target.value) handleBulkStatusUpdate(e.target.value);
+                  e.target.value = '';
+                }}
+                defaultValue=""
+                className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 outline-none"
+              >
+                <option value="" disabled>Set Pipeline Stage...</option>
+                <option value="inquiry">Stage: Procurement Inquiry</option>
+                <option value="qualified">Stage: Verified Mill Audit</option>
+                <option value="negotiation">Stage: Rate Negotiation</option>
+                <option value="won">Stage: Active Supply Contract</option>
+              </select>
+
+              <button
+                onClick={handleBulkDelete}
+                className="px-2.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded-lg border border-rose-500/40 flex items-center gap-1.5 text-xs transition"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Delete</span>
+              </button>
+
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="p-1.5 text-slate-400 hover:text-white transition"
+                title="Clear Selection"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Suppliers Table with Checkboxes & Sorting */}
         <div className={`rounded-xl overflow-hidden border shadow-sm transition ${
           isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
         }`}>
@@ -399,13 +658,30 @@ function VerifiedSuppliersContent() {
                 <tr className={`border-b font-semibold tracking-wider uppercase text-[10px] ${
                   isLight ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-slate-950 text-slate-400 border-slate-800'
                 }`}>
-                  <th className="py-3 px-4">Supplier / Producer Name</th>
-                  <th className="py-3 px-3">District & State</th>
-                  <th className="py-3 px-3">GSTIN / Licensing</th>
-                  <th className="py-3 px-3">Key Contact</th>
-                  <th className="py-3 px-3">Commodity Spec</th>
-                  <th className="py-3 px-2 text-center">Score</th>
-                  <th className="py-3 px-4 text-right">Action</th>
+                  <th className="py-3 px-3 w-8 text-center">
+                    <input
+                      type="checkbox"
+                      checked={suppliers.length > 0 && selectedIds.size === suppliers.length}
+                      onChange={handleToggleSelectAll}
+                      className="rounded border-slate-700 bg-slate-900 text-emerald-500 cursor-pointer w-3.5 h-3.5"
+                    />
+                  </th>
+                  <th className="py-3 px-4 cursor-pointer select-none" onClick={() => setSortBy(sortBy === 'name_asc' ? 'name_desc' : 'name_asc')}>
+                    <div className="flex items-center gap-1">
+                      <span>Facility Legal Name</span>
+                      <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                    </div>
+                  </th>
+                  <th className="py-3 px-3">Production Cluster</th>
+                  <th className="py-3 px-3">Commercial Contact</th>
+                  <th className="py-3 px-3">Milling Specialty</th>
+                  <th className="py-3 px-2 text-center cursor-pointer select-none" onClick={() => setSortBy(sortBy === 'score_desc' ? 'score_asc' : 'score_desc')}>
+                    <div className="flex items-center justify-center gap-1">
+                      <span>Score</span>
+                      <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                    </div>
+                  </th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/40">
@@ -413,141 +689,147 @@ function VerifiedSuppliersContent() {
                   <tr>
                     <td colSpan={7} className="py-12 text-center text-slate-500">
                       <Loader2 className="w-5 h-5 animate-spin mx-auto text-emerald-500 mb-2" />
-                      Loading verified suppliers...
+                      Loading verified suppliers &amp; mills...
                     </td>
                   </tr>
                 ) : suppliers.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-12 text-center text-slate-500">
-                      No suppliers found matching criteria.
+                      No suppliers found matching the criteria.
                     </td>
                   </tr>
                 ) : (
-                  suppliers.map((mill) => (
-                    <tr
-                      key={mill.id}
-                      className={`transition ${isLight ? 'hover:bg-slate-50' : 'hover:bg-slate-800/40'}`}
-                    >
-                      <td className="py-3 px-4">
-                        <div className="space-y-0.5">
-                          <div
-                            onClick={() => setSelectedCustomer(mill)}
-                            className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
-                              isLight ? 'text-slate-900 hover:text-emerald-600' : 'text-white hover:text-emerald-400'
-                            }`}
-                          >
-                            <Factory className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                            <span>{mill.company_name}</span>
-                            <span title="Verified Trade Facility">
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                            </span>
-                          </div>
-                          {mill.website && (
-                            <a
-                              href={mill.website.startsWith('http') ? mill.website : `https://${mill.website}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-[11px] text-blue-400 hover:underline flex items-center gap-1 font-mono"
+                  suppliers.map((s) => {
+                    const isSelected = selectedIds.has(s.id);
+                    return (
+                      <tr
+                        key={s.id}
+                        className={`transition ${isSelected ? 'bg-emerald-500/10' : (isLight ? 'hover:bg-slate-50' : 'hover:bg-slate-800/40')}`}
+                      >
+                        <td className="py-3 px-3 w-8 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectRow(s.id)}
+                            className="rounded border-slate-700 bg-slate-900 text-emerald-500 cursor-pointer w-3.5 h-3.5"
+                          />
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <div className="space-y-0.5">
+                            <div
+                              onClick={() => setSelectedCustomer(s)}
+                              className={`font-bold hover:underline cursor-pointer flex items-center gap-1.5 ${
+                                isLight ? 'text-slate-900 hover:text-emerald-600' : 'text-white hover:text-emerald-400'
+                              }`}
                             >
-                              <ExternalLink className="w-3 h-3" />
-                              <span className="truncate max-w-[180px]">{mill.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                            </a>
-                          )}
-                          {mill.custom_label && (
-                            <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
-                              <Tag className="w-2.5 h-2.5 text-slate-500" />
-                              <span>{mill.custom_label}</span>
+                              <Factory className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              <span>{s.company_name}</span>
+                              <span title="Verified Producer Facility">
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                              {s.gstin && (
+                                <div className="text-[10px] font-mono text-emerald-400 flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                  <span>GSTIN:</span>
+                                  <span>{s.gstin}</span>
+                                </div>
+                              )}
+                              {s.google_maps_url && (
+                                <a
+                                  href={s.google_maps_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] text-emerald-400 hover:underline font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1"
+                                >
+                                  <MapPin className="w-2.5 h-2.5" />
+                                  <span>Map POI</span>
+                                </a>
+                              )}
+                              {s.custom_label && (
+                                <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                                  <Tag className="w-2.5 h-2.5 text-slate-500" />
+                                  <span>{s.custom_label}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3 text-slate-400">
+                          <div className="font-medium text-slate-200">
+                            {s.district || s.city_or_hub || 'Regional Hub'}, {s.state || s.country || 'India'}
+                          </div>
+                          {s.address && (
+                            <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={s.address}>
+                              {s.address}
                             </div>
                           )}
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="py-3 px-3 text-slate-400">
-                        <div className="font-medium text-slate-200">
-                          {mill.district || mill.city_or_hub || 'Hub'}, {mill.state || mill.country || 'India'}
-                        </div>
-                        {mill.address && (
-                          <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={mill.address}>
-                            {mill.address}
+                        <td className="py-3 px-3">
+                          <div className="font-medium text-slate-200">
+                            {s.contact_person || 'Plant Procurement Head'}
                           </div>
-                        )}
-                      </td>
+                          {(s.phone || s.phones) && (
+                            <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono mt-0.5">
+                              <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span>{(s.phone || s.phones || '').split(';')[0].trim()}</span>
+                            </div>
+                          )}
+                          {(s.email || s.emails) && (
+                            <a
+                              href={`mailto:${(s.email || s.emails || '').split(';')[0].trim()}`}
+                              className="text-[11px] text-slate-400 hover:text-emerald-400 flex items-center gap-1 truncate max-w-[170px] mt-0.5"
+                            >
+                              <Mail className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span className="truncate">{(s.email || s.emails || '').split(';')[0].trim()}</span>
+                            </a>
+                          )}
+                        </td>
 
-                      <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
-                        {mill.gstin ? (
-                          <span className="flex items-center gap-1 text-emerald-400 font-semibold">
-                            <ShieldCheck className="w-3 h-3" />
-                            {mill.gstin}
+                        <td className="py-3 px-3 text-slate-300 max-w-[200px]" title={s.matched_varieties}>
+                          <div className="truncate font-medium">{s.matched_varieties || 'Non-Basmati & Parboiled Grains'}</div>
+                          {s.fssai_or_sfda_status && (
+                            <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
+                              <CheckCircle className="w-2.5 h-2.5" />
+                              <span>{s.fssai_or_sfda_status}</span>
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-2 text-center">
+                          <span className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
+                            s.priority_score >= 80
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {s.priority_score || 85}
                           </span>
-                        ) : (
-                          <span className="text-slate-500">Verified Plant</span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="py-3 px-3 text-slate-300">
-                        <div className="font-medium text-slate-200">
-                          {mill.contact_person || 'Facility Incharge'}
-                        </div>
-                        {(mill.email || mill.emails) && (
-                          <a
-                            href={`mailto:${(mill.email || mill.emails || '').split(';')[0].trim()}`}
-                            className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[170px]"
-                          >
-                            <Mail className="w-3 h-3 text-slate-500" />
-                            <span className="truncate">{(mill.email || mill.emails || '').split(';')[0].trim()}</span>
-                          </a>
-                        )}
-                        {(mill.phone || mill.phones) && (
-                          <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono mt-0.5">
-                            <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
-                            <span>{(mill.phone || mill.phones || '').split(';')[0].trim()}</span>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setSelectedCustomer(s)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition"
+                            >
+                              Dossier
+                            </button>
+                            <button
+                              onClick={() => openConvertModal(s)}
+                              className="px-2.5 py-1 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 shadow-sm transition"
+                            >
+                              + Contract
+                            </button>
                           </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-3 text-slate-300 max-w-[180px]" title={mill.matched_varieties}>
-                        <div className="truncate font-medium">{mill.matched_varieties || 'Sortex Cleaned Grain'}</div>
-                        {mill.hs_codes_applicable && (
-                          <div className="text-[10px] text-slate-500 font-mono">
-                            HS: {mill.hs_codes_applicable}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-2 text-center">
-                        <span className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
-                          mill.priority_score >= 70
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}>
-                          {mill.priority_score || 65}
-                        </span>
-                        {(mill.merge_count || 1) > 1 && (
-                          <div className="text-[9px] text-blue-400 font-bold mt-0.5">
-                            Merged x{mill.merge_count}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setSelectedCustomer(mill)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition"
-                          >
-                            Dossier
-                          </button>
-                          <button
-                            onClick={() => openConvertModal(mill)}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold text-white ${accentClasses.bg} shadow-sm transition`}
-                          >
-                            + Deal
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -578,7 +860,141 @@ function VerifiedSuppliersContent() {
         </div>
       </PageLeftNav>
 
-      {/* Convert to Deal Modal with Backdrop Click to Close */}
+      {/* Manual Supplier Creation Modal */}
+      {isAddModalOpen && (
+        <div
+          onClick={() => setIsAddModalOpen(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full max-w-lg rounded-2xl border p-6 shadow-2xl ${
+              isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
+            }`}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/40">
+              <h3 className={`text-base font-bold flex items-center gap-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                <Plus className="w-5 h-5 text-emerald-400" />
+                Register Verified Processing Mill / Supplier
+              </h3>
+              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSupplierSubmit} className="space-y-3 mt-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Facility Legal Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Burdwan Agro Processing Mills Pvt Ltd"
+                  value={newSupplierForm.company_name}
+                  onChange={(e) => setNewSupplierForm({ ...newSupplierForm, company_name: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">State / Province</label>
+                  <input
+                    type="text"
+                    value={newSupplierForm.state}
+                    onChange={(e) => setNewSupplierForm({ ...newSupplierForm, state: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">District / Hub</label>
+                  <input
+                    type="text"
+                    value={newSupplierForm.district}
+                    onChange={(e) => setNewSupplierForm({ ...newSupplierForm, district: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Key Commercial Contact</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Joydeep Ghosh (Director)"
+                    value={newSupplierForm.contact_person}
+                    onChange={(e) => setNewSupplierForm({ ...newSupplierForm, contact_person: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Facility Phone</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. +91 9434123456"
+                    value={newSupplierForm.phones}
+                    onChange={(e) => setNewSupplierForm({ ...newSupplierForm, phones: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Official Email</label>
+                  <input
+                    type="email"
+                    placeholder="e.g. mills@burdwanagro.com"
+                    value={newSupplierForm.emails}
+                    onChange={(e) => setNewSupplierForm({ ...newSupplierForm, emails: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">GSTIN Number</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 19AAACB1234F1Z5"
+                    value={newSupplierForm.gstin}
+                    onChange={(e) => setNewSupplierForm({ ...newSupplierForm, gstin: e.target.value.toUpperCase() })}
+                    className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Processing Specialties / Varieties</label>
+                <input
+                  type="text"
+                  value={newSupplierForm.matched_varieties}
+                  onChange={(e) => setNewSupplierForm({ ...newSupplierForm, matched_varieties: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800/40">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingLead}
+                  className="px-5 py-2 rounded-xl font-semibold text-white bg-emerald-600 hover:bg-emerald-500 shadow-md transition flex items-center gap-1.5"
+                >
+                  {creatingLead ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>{creatingLead ? 'Registering...' : 'Save Supplier'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Convert to Supply Contract Deal Modal */}
       {convertCustomer && (
         <div
           onClick={() => setConvertCustomer(null)}
@@ -592,8 +1008,8 @@ function VerifiedSuppliersContent() {
           >
             <div className="flex items-center justify-between pb-3 border-b border-slate-800/40">
               <h3 className={`text-base font-bold flex items-center gap-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                <Kanban className="w-5 h-5 text-emerald-400" />
-                Enroll Supplier in Pipeline Deal
+                <Factory className="w-5 h-5 text-emerald-400" />
+                Enroll Supplier in Supply Contract
               </h3>
               <button onClick={() => setConvertCustomer(null)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
@@ -602,7 +1018,7 @@ function VerifiedSuppliersContent() {
 
             <form onSubmit={handleConvertSubmit} className="space-y-3 mt-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Producer / Supplier</label>
+                <label className="block text-slate-300 font-semibold mb-1">Processing Facility</label>
                 <input
                   type="text"
                   disabled
@@ -612,7 +1028,7 @@ function VerifiedSuppliersContent() {
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Contract / Deal Title *</label>
+                <label className="block text-slate-300 font-semibold mb-1">Contract Title *</label>
                 <input
                   type="text"
                   required
@@ -624,7 +1040,7 @@ function VerifiedSuppliersContent() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Commodity Line</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Grain Spec</label>
                   <input
                     type="text"
                     required
@@ -647,7 +1063,7 @@ function VerifiedSuppliersContent() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Incoterms</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Delivery Incoterm</label>
                   <input
                     type="text"
                     value={convertForm.incoterm}
@@ -656,7 +1072,7 @@ function VerifiedSuppliersContent() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Payment Terms</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Settlement Terms</label>
                   <input
                     type="text"
                     value={convertForm.payment_terms}
@@ -676,9 +1092,9 @@ function VerifiedSuppliersContent() {
                 </button>
                 <button
                   type="submit"
-                  className={`px-5 py-2 rounded-xl font-semibold text-white ${accentClasses.bg} shadow-md transition`}
+                  className="px-5 py-2 rounded-xl font-semibold text-white bg-emerald-600 hover:bg-emerald-500 shadow-md transition"
                 >
-                  Save Contract Deal
+                  Enroll Supplier
                 </button>
               </div>
             </form>
@@ -686,14 +1102,10 @@ function VerifiedSuppliersContent() {
         </div>
       )}
 
-      {/* Customer Dossier Modal with Interactive Google Map */}
+      {/* Customer Dossier Modal */}
       <CustomerDossier
         customer={selectedCustomer}
         onClose={() => setSelectedCustomer(null)}
-        onConvertToDeal={(c) => {
-          setSelectedCustomer(null);
-          openConvertModal(c || selectedCustomer);
-        }}
       />
     </Shell>
   );
@@ -706,7 +1118,7 @@ export default function VerifiedSuppliersPage() {
         <Shell>
           <div className="py-24 text-center text-xs text-slate-500">
             <Loader2 className="w-6 h-6 animate-spin text-emerald-500 mx-auto mb-2" />
-            Loading Verified Commercial Suppliers...
+            Loading Verified Processing Facilities &amp; Suppliers...
           </div>
         </Shell>
       }

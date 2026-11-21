@@ -31,7 +31,7 @@ You are working on **TradePulse EXIM (`dipspot_ie_manager`)**, a high-performanc
 5. **Always Verify with Tests**:
    - After modifying crawler, engine, or catalog code, run:
      ```bash
-     PYTHONPATH=backend python3 -m pytest backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
+     PYTHONPATH=backend python3 -m pytest backend/tests/test_crm_twenty_and_osint.py backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
      ```
    - After frontend modifications, verify build:
      ```bash
