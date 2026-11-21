@@ -81,7 +81,7 @@ web-scrapper/
 │   │   ├── map_extractor.py        # Geospatial extraction & Google Maps POI resolver
 │   │   ├── smtp_stopper.py         # Personal Gmail SMTP rate limit enforcement (500/day)
 │   │   ├── followup_engine.py      # Omnichannel outreach (Gmail & WhatsApp Cloud API)
-│   │   ├── sources.py              # 260+ cataloged B2B and customs data sources
+│   │   ├── sources.py              # 765+ cataloged B2B directories, port authorities, and customs manifest sources
 │   │   ├── routes/
 │   │   │   ├── api.py              # Main REST API (/api/leads, /api/scrape, /api/crawler)
 │   │   │   ├── campaigns.py        # Outbound sequences & email automation
@@ -256,7 +256,7 @@ cd frontend && npm run dev
 Always run tests before committing code:
 ```bash
 # Run all core verification, strictness & government source tests
-PYTHONPATH=backend python3 -m pytest backend/tests/test_crm_twenty_and_osint.py backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
+PYTHONPATH=backend python3 -m pytest backend/tests/test_crm_twenty_and_osint.py backend/tests/test_go4worldbusiness_deep_enrichment.py backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
 
 # Run frontend production build
 cd frontend && npm run build
