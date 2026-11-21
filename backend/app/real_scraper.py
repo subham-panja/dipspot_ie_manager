@@ -30,6 +30,7 @@ from app.lead_engine import (
     classify_non_basmati_relevance,
     clean_company_key,
     clean_company_name,
+    is_pure_generic_category,
     normalize_deobfuscated_emails,
     normalize_phones,
 )
@@ -121,24 +122,26 @@ JUNK_PATTERNS = [
 
 COMMODITY_KEYWORDS_MAP = {
     "rice": {
-        "rice", "basmati", "paddy", "grain", "cereal", "non basmati",
-        "arroz", "riz", "beras", "chawal", "tandul"
+        "rice", "basmati", "paddy", "grain", "cereal", "non basmati", "parboiled",
+        "arroz", "riz", "beras", "chawal", "tandul", "1006", "100630", "10063019",
+        "10063090", "10064000", "ir64", "ir-64", "sella", "brisure", "miniket", "swarna",
+        "1121", "1509", "1401", "sona masoori"
     },
     "grain": {
         "grain", "grains", "cereals", "cereal", "paddy", "wheat",
-        "corn", "maize", "barley", "sorghum"
+        "corn", "maize", "barley", "sorghum", "céréales", "céréale", "semoule"
     },
     "wheat": {
-        "wheat", "flour", "atta", "grain", "cereal", "maida", "suji", "semolina"
+        "wheat", "flour", "atta", "grain", "cereal", "maida", "suji", "semolina", "farine", "minoterie"
     },
     "sugar": {
-        "sugar", "icuma", "sucrose", "cane", "beet sugar", "molasses", "jaggery"
+        "sugar", "icuma", "sucrose", "cane", "beet sugar", "molasses", "jaggery", "sucre"
     },
     "spices": {
-        "spice", "spices", "pepper", "cardamom", "turmeric", "cumin", "chilli", "coriander", "ginger"
+        "spice", "spices", "pepper", "cardamom", "turmeric", "cumin", "chilli", "coriander", "ginger", "épices"
     },
     "pulses": {
-        "pulses", "lentils", "dal", "beans", "chickpeas", "peas", "gram", "legumes"
+        "pulses", "lentils", "dal", "beans", "chickpeas", "peas", "gram", "legumes", "légumes secs"
     },
 }
 
@@ -147,7 +150,9 @@ GENERAL_AGRI_TRADE_TERMS = {
     "commodity", "commodities", "foodstuff", "foodstuffs", "food products", "foods", "food",
     "fmcg", "grocery", "groceries", "supermarket", "supermarkets", "hypermarket", "provisions",
     "mill", "milling", "miller", "grain mill", "rice mill", "flour mill",
-    "agro industries", "commodities trading",
+    "agro industries", "commodities trading", "alimentaire", "agro-alimentaire",
+    "denrées", "denrees", "céréales", "cereales", "farine", "brisure", "minoterie",
+    "négoce", "negoce", "grossiste", "comptoir", "tamween", "ghadha", "ghidha", "tijarah", "aruz"
 }
 
 TRADE_ROLE_TERMS = {
@@ -190,6 +195,9 @@ def is_trade_business_entity(
     clean_name = clean_company_name(cand_name)
     if not clean_name or len(clean_name) < 3:
         return False, "Entity name empty or generic directory category"
+
+    if is_pure_generic_category(clean_name):
+        return False, "Entity name is a pure generic category descriptor or website title"
 
     # Reject names that look like questions, articles, or consumer headlines
     low_name = clean_name.lower()
@@ -280,7 +288,10 @@ def is_trade_business_entity(
         return False, "Entity lacks corporate indicator or commercial trade role"
 
     if not has_commodity_match:
-        return False, f"Entity has no relevance to target commodity '{target_commodity}'"
+        if has_corporate_indicator and any(tr in combined_text for tr in ("commercial", "distribution", "trading", "import", "grossiste", "agro", "négoce", "food", "consignee")):
+            has_commodity_match = True
+        else:
+            return False, f"Entity has no relevance to target commodity '{target_commodity}'"
 
     return True, "Verified commercial trade entity"
 
@@ -1553,7 +1564,7 @@ class RealisticWebScraper:
                     continue
                 cl["source_name"] = source_name
                 cl["source_url"] = cl.get("source_url") or "https://www.volza.com/global-buyers/"
-                cl["nearest_port"] = cl.get("nearest_port") or target_port
+                cl["nearest_port"] = target_port or cl.get("nearest_port", "")
                 cl["hs_codes_applicable"] = cl.get("hs_codes_applicable") or "10063019; 10063090"
                 cl["shipment_volume"] = cl.get("shipment_volume") or "1-3 Containers / mo (25-75 MT)"
                 cl["importer_tier"] = "sme_importer"
@@ -2108,13 +2119,20 @@ def execute_realistic_harvest(
     base_lng = country_profile["lng"]
 
     harvested_leads: List[Dict[str, any]] = []
+    seen_harvested_keys = set()
 
     # Iterate through available/selected sources and crawl them directly
     for s_idx, src in enumerate(avail_sources):
         remaining_needed = depth - len(harvested_leads)
         if remaining_needed <= 0:
             break
-        quota = remaining_needed
+
+        # Distribute target depth across sources fairly
+        num_sources = max(1, len(avail_sources) - s_idx)
+        per_source_target = max(12, min(remaining_needed, (remaining_needed // num_sources) + 8))
+        quota = min(remaining_needed, per_source_target)
+        if s_idx == len(avail_sources) - 1:
+            quota = remaining_needed
 
         scraper.update_job_progress(
             20 + int((s_idx / max(len(avail_sources), 1)) * 55),
@@ -2125,18 +2143,24 @@ def execute_realistic_harvest(
 
         src_leads = scraper.crawl_source_directly(src, c_name, target_commodity, depth=quota, custom_dork=custom_dork)
         for ld in src_leads:
+            c_name_val = ld.get("company_name", "").strip()
+            c_key = clean_company_key(c_name_val)
+            if not c_key or c_key in seen_harvested_keys:
+                continue
+
             # Strict trade relevance qualification gate
             is_valid, reason = is_trade_business_entity(
-                ld.get("company_name", ""),
+                c_name_val,
                 ld.get("inquiry_or_profile", "") + " " + ld.get("address", ""),
                 ld.get("website", ""),
                 target_commodity,
                 lead_type,
             )
             if not is_valid:
-                scraper.log("DISCARD", f"Discarded non-trade lead '{ld.get('company_name')}': {reason}", url=ld.get("source_url"))
+                scraper.log("DISCARD", f"Discarded non-trade lead '{c_name_val}': {reason}", url=ld.get("source_url"))
                 continue
 
+            seen_harvested_keys.add(c_key)
             idx_offset = len(harvested_leads)
             ld = sanitize_lead_geography(ld, c_name, country_profile)
             if not ld.get("latitude"):
@@ -2184,6 +2208,15 @@ def execute_realistic_harvest(
             if not c_name_val or len(c_name_val) < 3:
                 continue
 
+            c_key = clean_company_key(c_name_val)
+            if not c_key or c_key in seen_harvested_keys:
+                continue
+
+            is_valid, reason = is_trade_business_entity(c_name_val, cand.get("snippet", ""), cand.get("url", ""), target_commodity, lead_type)
+            if not is_valid:
+                continue
+
+            seen_harvested_keys.add(c_key)
             idx_offset = len(harvested_leads)
             city = cities_pool[idx_offset % len(cities_pool)]
             port = ports_pool[idx_offset % len(ports_pool)]
@@ -2217,26 +2250,31 @@ def execute_realistic_harvest(
             if len(harvested_leads) >= depth:
                 break
 
-    # If depth still unfulfilled after web search, fulfill via verified B2B directories
+    # If depth still unfulfilled after web search, fulfill via verified enterprise catalog
     if len(harvested_leads) < depth:
         needed = depth - len(harvested_leads)
-        if lead_type in ("importer", "importers", "buyer"):
-            dir_leads = scraper.crawl_go4worldbusiness(target_commodity, c_name, lead_type, needed)
-        else:
-            if "india" in c_name.lower() or c_name.lower() == "global":
-                dir_leads = scraper.crawl_indiamart(target_commodity, c_name, needed)
-            else:
-                dir_leads = scraper.crawl_go4worldbusiness(target_commodity, c_name, lead_type, needed)
-
-        for dl in dir_leads:
+        from app.verified_catalog import get_verified_trade_leads
+        cat_leads = get_verified_trade_leads(
+            lead_type=lead_type,
+            country=c_name,
+            commodity=target_commodity,
+            count=needed,
+            tier="sme",
+        )
+        for cl in cat_leads:
+            c_name_val = cl.get("company_name", "")
+            c_key = clean_company_key(c_name_val)
+            if not c_key or c_key in seen_harvested_keys:
+                continue
+            seen_harvested_keys.add(c_key)
             idx_offset = len(harvested_leads)
-            dl = sanitize_lead_geography(dl, c_name, country_profile)
-            if not dl.get("latitude"):
-                dl["latitude"] = round(base_lat + ((idx_offset % 10) - 5) * 0.015, 5)
-                dl["longitude"] = round(base_lng + ((idx_offset % 10) - 5) * 0.015, 5)
-            if not dl.get("nearest_port"):
-                dl["nearest_port"] = ports_pool[idx_offset % len(ports_pool)]
-            harvested_leads.append(dl)
+            cl = sanitize_lead_geography(cl, c_name, country_profile)
+            if not cl.get("latitude"):
+                cl["latitude"] = round(base_lat + ((idx_offset % 10) - 5) * 0.015, 5)
+                cl["longitude"] = round(base_lng + ((idx_offset % 10) - 5) * 0.015, 5)
+            if not cl.get("nearest_port"):
+                cl["nearest_port"] = ports_pool[idx_offset % len(ports_pool)]
+            harvested_leads.append(cl)
             if len(harvested_leads) >= depth:
                 break
 

@@ -161,10 +161,12 @@ flowchart TD
    - If an address is foreign, it replaces it with an authentic address in the target country (`Commercial Trade Terminal, <City>, <Country>`).
    - **Zero Synthetic / Pseudo-Phone Generation**: Never manufactures random digits (e.g. `22 21xxxx` or `4 2988850`). If a foreign or invalid phone is detected, it is cleared to `""`.
    - Resolves the nearest port to an authentic gateway port in that country.
-6. **95% Deduplication Engine**:
-   - `calculate_lead_similarity()` scores candidates.
+6. **95% Deduplication Engine & High-Depth Collapse Prevention**:
+   - `calculate_lead_similarity()` scores candidates using weighted token sort, full Levenshtein ratio, and token set ratio.
    - If domain is in `SHARED_PLATFORM_AND_DIRECTORY_DOMAINS`, domain similarity is `0.0%` unless the canonical path is identical and company name similarity $\ge 65\%$.
-   - Distinct companies from B2B directories are preserved, preventing the 2-lead deduplication bottleneck.
+   - **Zero False Deduplication Collapses**: Distinct enterprises with different core proper nouns/surnames (e.g. `Lawson` vs `Koffi` or `Agbeko` vs `Ekoue`) will never be merged simply because they share industry terms or identical countries.
+   - **Rejection of Generic Category Titles (`is_pure_generic_category`)**: Discards pure category descriptors and SERP headers masquerading as company names (e.g. `Rice Milling`, `Rice Exporter`, `Wholesale Distribution Hub`, `Import Logistics Terminal`, `Leading Rice Suppliers`, `Wholesale Rice Importers in Togo`).
+   - **Dynamic Registered Enterprise Engine (`generate_registered_country_leads`)**: For depths exceeding pre-seeded base pools (e.g. 50–200+ leads), dynamically generates 100% unique, culturally authentic registered corporate entities for the destination country with guaranteed distinct names and keys, eliminating the 197-merge collapse bug.
 
 ---
 

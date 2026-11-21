@@ -189,6 +189,36 @@ def decode_gstin_and_fssai(text: str) -> Tuple[str, str, str]:
     return gstin, pan, fssai
 
 
+GENERIC_TRADE_DESCRIPTOR_WORDS = {
+    "rice", "grain", "grains", "wheat", "food", "foods", "foodstuff", "foodstuffs",
+    "commodity", "commodities", "milling", "mill", "mills", "miller", "millers",
+    "exporter", "exporters", "exporting", "importer", "importers", "importing", "import",
+    "supplier", "suppliers", "manufacturer", "manufacturers", "wholesale", "wholesaler", "wholesalers",
+    "distributor", "distributors", "distribution", "trading", "trader", "traders",
+    "hub", "terminal", "desk", "center", "centre", "inward", "cargo", "manifest", "manifests",
+    "logistics", "commercial", "facility", "facilities", "division", "unit", "operations",
+    "in", "from", "for", "to", "and", "&", "the", "a", "an", "of", "global", "international", "general",
+    "parboiled", "basmati", "non-basmati", "white", "paddy", "cereal", "cereals",
+    "market", "markets", "supermarket", "hypermarket", "grocery", "groceries",
+    "dealer", "dealers", "retailer", "retailers", "merchant", "merchants", "provisions",
+    "india", "togo", "benin", "ghana", "nigeria", "kenya", "uae", "dubai", "saudi", "arabia",
+    "china", "usa", "uk", "vietnam", "thailand", "pakistan", "asia", "africa", "europe"
+}
+
+
+def is_pure_generic_category(name: str) -> bool:
+    """Detects whether a string is merely a trade category or page title descriptor rather than a company name."""
+    if not name:
+        return True
+    low = name.lower().strip()
+    if re.search(r"\b(?:pvt|ltd|limited|llc|sarl|gmbh|inc|corp|corporation|co|fze|fzco|wll|sa|sas|pjsc)\b", low):
+        return False
+    tokens = [t.lower() for t in re.findall(r"[A-Za-z]+", low)]
+    if not tokens:
+        return True
+    return all(t in GENERIC_TRADE_DESCRIPTOR_WORDS for t in tokens)
+
+
 def clean_company_name(raw_name: str) -> str:
     """
     Intelligently extracts and normalizes a corporate entity name from raw search result titles,
@@ -221,7 +251,8 @@ def clean_company_name(raw_name: str) -> str:
         r"\b(?:rice\s+exporters|rice\s+suppliers|rice\s+manufacturers|rice\s+millers)\s+(?:in|from)\s+[a-z]+",
         r"\b(?:basmati|non\s+basmati)\s+rice\s+(?:exporters|suppliers|manufacturers|wholesalers)",
         r"\b(?:buy|order)\s+rice\s+online",
-        r"\bwholesale\s+(?:\w+\s+)?(?:market|distributors|suppliers)\s+(?:in|from)\s+[a-z]+",
+        r"\bwholesale\s+(?:\w+\s+)?(?:market|distributors|suppliers|importers|buyers|dealers)\s+(?:in|from)\s+[a-z]+",
+        r"\b(?:importers|buyers)\s+(?:in|from)\s+[a-z]+",
         r"\b(?:retailers|dealers)\s+(?:in|from)\s+[a-z]+",
         r"^rice\s+exporters\s+in\s+india$",
         r"^exporters\s+in\s+india$",
@@ -333,12 +364,12 @@ def clean_company_name(raw_name: str) -> str:
         for pat in GENERIC_CATEGORY_DISCARDS:
             if re.search(pat, single.lower()) and not has_corp_suffix:
                 return ""
-        if score_chunk(single) <= 15.0:
+        if score_chunk(single) <= 15.0 or is_pure_generic_category(single):
             return ""
         return single
 
     scored_chunks = [(c, score_chunk(c)) for c in chunks]
-    valid_chunks = [sc for sc in scored_chunks if sc[1] > -30.0]
+    valid_chunks = [sc for sc in scored_chunks if sc[1] > -30.0 and not is_pure_generic_category(sc[0])]
     if not valid_chunks:
         return ""
 
@@ -347,6 +378,8 @@ def clean_company_name(raw_name: str) -> str:
     best_chunk = re.sub(r"^(?:Welcome\s+to|Official\s+Site\s+of|Home\s+of)\s+", "", best_chunk, flags=re.I).strip()
     best_chunk = re.sub(r"\.(?:com|org|net|ae|in|co|gov|edu)$", "", best_chunk, flags=re.I).strip()
     best_chunk = re.sub(r"\s+[-–—]\s+(?:UAE|Dubai|India|Togo|USA|UK|Kolkata)$", "", best_chunk, flags=re.I).strip()
+    if is_pure_generic_category(best_chunk):
+        return ""
     return best_chunk.strip()
 
 
@@ -475,19 +508,17 @@ def calculate_lead_similarity(
     if c_key and e_key:
         sort_ratio = fuzz.token_sort_ratio(c_key, e_key)
         set_ratio = fuzz.token_set_ratio(c_key, e_key)
-        partial = fuzz.partial_ratio(c_key, e_key)
+        full_ratio = fuzz.ratio(c_key, e_key)
 
-        # Weighted composite score
-        name_score = round(0.55 * sort_ratio + 0.35 * set_ratio + 0.10 * partial, 1)
+        # Weighted composite score emphasizing complete token order and distinct proper names
+        name_score = round(0.65 * sort_ratio + 0.25 * full_ratio + 0.10 * set_ratio, 1)
 
         c_country = (candidate.get("country") or "").strip().lower()
         e_country = (existing.get("country") or "").strip().lower()
 
-        # If in the same country, high name similarity confirms same entity
+        # If in the same country, verify high-confidence match
         if c_country and e_country and c_country == e_country:
             matching_fields.append("country")
-            if name_score >= 90.0:
-                name_score = min(round(name_score * 1.05, 1), 100.0)
             if name_score >= 95.0:
                 matching_fields.append("company_name")
                 return (name_score, f"Company Name NLP match ({name_score}%) in same country", matching_fields)

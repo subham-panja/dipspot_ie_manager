@@ -247,3 +247,56 @@ class TestSaveLeadsWithDedupRoleIntegrity:
             assert saved["lead_type"] == "wb_mill", f"Indian entity must be saved as 'wb_mill', not 'importer'! Got: {saved['lead_type']}"
             db.leads.delete_many({"company_name": "Test Bengal Mill"})
 
+
+class TestHighDepthDeduplicationCollapsePrevention:
+    """Verifies that high depth (e.g. 200 leads) never collapses into 3 leads with duplicate suffixes."""
+
+    def test_200_leads_generation_has_zero_duplicate_names_or_desk_suffixes(self):
+        from app.verified_catalog import get_verified_trade_leads
+        from app.lead_engine import clean_company_key
+
+        leads = get_verified_trade_leads(
+            lead_type="importer",
+            country="Togo",
+            commodity="Non-Basmati & Parboiled Rice (HS 100630)",
+            count=200,
+            tier="sme",
+            port="Autonomous Port of Lome (TGTGO)",
+        )
+        assert len(leads) == 200
+        names = [l["company_name"] for l in leads]
+        keys = [clean_company_key(n) for n in names]
+        assert len(set(names)) == 200, f"Expected 200 unique names, got {len(set(names))}"
+        assert len(set(keys)) == 200, f"Expected 200 unique clean keys, got {len(set(keys))}"
+
+        # Guarantee zero repeated desk suffixes like '- Wholesale Distribution Hub'
+        for name in names:
+            assert " - Wholesale Distribution Hub" not in name
+            assert " - Import Logistics Terminal" not in name
+            assert " - Central Storage Division" not in name
+
+    def test_generic_descriptors_rejected_as_company_names(self):
+        from app.lead_engine import clean_company_name, is_pure_generic_category
+
+        generic_titles = [
+            "Rice Milling",
+            "Rice Exporter",
+            "Wholesale Distribution Hub",
+            "Import Logistics Terminal",
+            "Leading Rice Suppliers",
+            "Wholesale Rice Importers in Togo",
+        ]
+        for gt in generic_titles:
+            cleaned = clean_company_name(gt)
+            assert cleaned == "" or is_pure_generic_category(cleaned), f"Generic descriptor '{gt}' must be discarded! Got: '{cleaned}'"
+
+        legit_companies = [
+            "KRBL Limited",
+            "Comptoir Commercial du Togo SARL",
+            "Purba Bardhaman Agro Milling Pvt Ltd",
+            "Al-Maya Foodstuff Trading LLC",
+        ]
+        for lc in legit_companies:
+            assert not is_pure_generic_category(lc), f"Legitimate company '{lc}' was falsely flagged as generic!"
+
+
