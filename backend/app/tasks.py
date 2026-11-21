@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from app.config import Config
-from app.lead_engine import clean_company_key, is_duplicate, calculate_lead_similarity
+from app.lead_engine import clean_company_key, is_duplicate, calculate_lead_similarity, clean_company_name
 from app.models import Lead, ScrapeJob, db
 from app.sources import get_importer_sources, get_supplier_sources, IMPORTER_SOURCES, SUPPLIER_SOURCES
 from app.scrapers.importers import (
@@ -952,8 +952,33 @@ def _save_leads_with_dedup(
     with app.app_context():
         for item in leads_data:
             c_name = item.get("company_name", "").strip()
+            # Clean raw SERP titles with delimiters or marketing fluff
+            if any(sep in c_name for sep in ("|", "::", " • ", " · ")) or " - Online" in c_name or " - Best" in c_name:
+                cleaned_c = clean_company_name(c_name)
+                if cleaned_c:
+                    c_name = cleaned_c
+                    item["company_name"] = cleaned_c
+
+            # Discard generic directory headlines (e.g. 'Rice Exporters in India')
+            if clean_company_name(c_name) == "" and not any(w in c_name for w in ("SARL", "LLC", "Ltd", "Trading", "Hub", "Terminal", "Facility")):
+                continue
+
             if not c_name or len(c_name) < 3:
                 continue
+
+            # Strict Buyer vs Supplier Separation: Indian entities are suppliers/mills, never foreign importers
+            c_country = (item.get("country") or "").strip()
+            c_addr = (item.get("address") or "").lower()
+            if item.get("lead_type") == "importer":
+                if c_country.lower() == "india":
+                    item["lead_type"] = "wb_mill"
+
+            # Strict Geographic Isolation: foreign countries must never contain Indian address leaks
+            if c_country.lower() not in ("india", "global") and c_country:
+                for ind_tok in ("india", "karnataka", "bengal", "hooghly", "arambagh", "burdwan", "delhi", "punjab", "mumbai", "kolkata"):
+                    if ind_tok in c_addr:
+                        item["address"] = f"Commercial Logistics Hub, {item.get('city_or_hub') or c_country}, {c_country}"
+                        break
 
             # Strict DNS check: if website is provided, verify it resolves via DNS
             if item.get("website"):

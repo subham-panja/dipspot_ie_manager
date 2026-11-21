@@ -205,6 +205,18 @@ def is_trade_business_entity(
     if low_name in {"indiamart", "tradeindia", "go4worldbusiness", "exportersindia", "kompass", "europages", "volza", "panjiva"}:
         return False, "Entity name is directory portal aggregator itself"
 
+    # Reject product specifications, packaging types, and weight attributes masquerading as company names
+    PACKAGING_SPEC_PATTERNS = [
+        r"\b(?:plastic|jute|gunny|pp|woven)\s*bags?\b",
+        r"\b\d+\s*(?:kg|mt|gm)\b",
+        r"\b(?:packaging\s*type|for\s*cooking)\b",
+        r"\b(?:5kg|10kg|25kg|50kg)\b",
+        r"^(?:white|yellow|non-parboiled|parboiled)(?:,\s*packaging|\s*rice)?$",
+    ]
+    for pat in PACKAGING_SPEC_PATTERNS:
+        if re.search(pat, low_name):
+            return False, f"Entity name '{clean_name}' is a product specification or packaging attribute, not a business entity"
+
     # Check domain blacklist (maps.google.com and openstreetmap.org are location coordinates, not company domains)
     cand_domain = extract_domain(cand_url) if cand_url else ""
     if cand_domain and not any(m in cand_domain for m in ("maps.google.com", "openstreetmap.org")):
@@ -893,7 +905,8 @@ class RealisticWebScraper:
         dork_q = custom_dork
         if not dork_q:
             if is_imp:
-                dork_q = f'("{commodity}") ("importers" OR "wholesale" OR "trading LLC") "{target_c}" -filetype:pdf -site:wikipedia.org'
+                neg_b2b = " -site:indiamart.com -site:tradeindia.com -site:exportersindia.com" if "india" not in target_c.lower() else ""
+                dork_q = f'("{commodity}") ("importers" OR "wholesale" OR "trading LLC") "{target_c}" -filetype:pdf -site:wikipedia.org{neg_b2b} -exporter -exporting -manufacturer'
             else:
                 dork_q = f'("{commodity}") ("manufacturers" OR "rice mill" OR "exporters") "{target_c}" -filetype:pdf -site:wikipedia.org'
 
@@ -905,13 +918,33 @@ class RealisticWebScraper:
         for cand in candidates:
             if not is_domain_live(cand["domain"]):
                 continue
+
+            c_name_val = clean_company_name(cand["name"])
+            if not c_name_val or len(c_name_val) < 3:
+                continue
+
+            is_valid, reason = is_trade_business_entity(
+                c_name_val,
+                cand.get("snippet", ""),
+                cand.get("url", ""),
+                commodity,
+                lead_type,
+            )
+            if not is_valid:
+                continue
+
             c_info = self.crawl_contact_details(cand["url"])
+            if c_info.get("legal_name"):
+                legal_c = clean_company_name(c_info["legal_name"])
+                if legal_c and len(legal_c) >= 3:
+                    c_name_val = legal_c
+
             valid_emails = filter_live_emails(c_info["emails"]) if c_info.get("emails") else ""
             phones_str = "; ".join(c_info["phones"]) if c_info.get("phones") else ""
             address_str = c_info["address"] or f"{cand.get('snippet', '')[:120]}, {target_c}"
 
             leads.append({
-                "company_name": cand["name"],
+                "company_name": c_name_val,
                 "country": target_c,
                 "city_or_hub": target_c,
                 "state": f"{target_c} Commercial Hub",
@@ -937,13 +970,17 @@ class RealisticWebScraper:
         if len(leads) < depth and not custom_dork:
             secondary_dorks = [
                 f'site:go4worldbusiness.com ("{commodity}") "{target_c}"',
-                f'site:indiamart.com/impcat/ ("{commodity}")',
-                f'site:tradeindia.com ("{commodity}")',
-                f'site:exportersindia.com ("{commodity}")',
                 f'"{commodity}" ("commercial importer" OR "wholesale distributor" OR "foodstuff trading LLC") "{target_c}" -site:wikipedia.org -site:flipkart.com -site:amazon.com',
-                f'"{commodity}" ("processing plant" OR "milling unit" OR "rice mill") "{target_c}" -site:wikipedia.org -site:flipkart.com -site:amazon.com',
                 f'inurl:contact ("{commodity}" AND ("importer" OR "import" OR "procurement")) "{target_c}" -site:wikipedia.org',
             ]
+            if not is_imp and ("india" in target_c.lower() or target_c.lower() == "global"):
+                secondary_dorks.extend([
+                    f'site:indiamart.com/impcat/ ("{commodity}")',
+                    f'site:tradeindia.com ("{commodity}")',
+                    f'site:exportersindia.com ("{commodity}")',
+                    f'"{commodity}" ("processing plant" OR "milling unit" OR "rice mill") "{target_c}" -site:wikipedia.org',
+                ])
+
             for sec_q in secondary_dorks:
                 if len(leads) >= depth:
                     break
@@ -951,9 +988,29 @@ class RealisticWebScraper:
                 for cand in sec_cands:
                     if not is_domain_live(cand["domain"]):
                         continue
+
+                    c_name_val = clean_company_name(cand["name"])
+                    if not c_name_val or len(c_name_val) < 3:
+                        continue
+
+                    is_valid, reason = is_trade_business_entity(
+                        c_name_val,
+                        cand.get("snippet", ""),
+                        cand.get("url", ""),
+                        commodity,
+                        lead_type,
+                    )
+                    if not is_valid:
+                        continue
+
                     c_info = self.crawl_contact_details(cand["url"])
+                    if c_info.get("legal_name"):
+                        legal_c = clean_company_name(c_info["legal_name"])
+                        if legal_c and len(legal_c) >= 3:
+                            c_name_val = legal_c
+
                     leads.append({
-                        "company_name": cand["name"],
+                        "company_name": c_name_val,
                         "country": target_c,
                         "city_or_hub": target_c,
                         "state": f"{target_c} Commercial Hub",

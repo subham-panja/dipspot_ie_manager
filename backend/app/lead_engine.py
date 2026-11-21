@@ -194,9 +194,14 @@ def clean_company_name(raw_name: str) -> str:
         r"\b(?:basmati|non\s+basmati)\s+rice\s+(?:exporters|suppliers|manufacturers)",
         r"\b(?:buy|order)\s+rice\s+online",
         r"\bwholesale\s+(?:\w+\s+)?(?:market|distributors|suppliers)\s+(?:in|from)\s+[a-z]+",
+        r"\b(?:retailers|dealers)\s+(?:in|from)\s+[a-z]+",
         r"^rice\s+exporters\s+in\s+india$",
         r"^exporters\s+in\s+india$",
         r"\b(?:mandi\s+rates?|mandi\s+prices?|wholesale\s+rice\s+prices?)\b",
+        r"\b(?:\d+\s*(?:kg|mt)|plastic\s+bags?|jute\s+bags?|gunny\s+bags?|packaging\s+type|for\s+cooking)\b",
+        r"^\d+\s*(?:kg|mt|gm)",
+        r"^(?:plastic|jute|gunny)\s+bags?$",
+        r"^(?:white|yellow|non-parboiled|parboiled)(?:,\s*packaging|\s*rice)?$",
     ]
     for pat in GENERIC_CATEGORY_DISCARDS:
         if re.search(pat, low_full) and not any(sep in name for sep in ("|", " - ", " – ", " — ", "•", "·", "::")):

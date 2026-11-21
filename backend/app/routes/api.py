@@ -209,10 +209,8 @@ def get_leads():
     country = request.args.get("country")
     if country:
         filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
-
-    country = request.args.get("country")
-    if country:
-        filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
+    elif lead_type == "importer":
+        filter_q["country"] = {"$ne": "India"}
 
     district = request.args.get("district")
     if district:
@@ -276,6 +274,9 @@ def get_importers():
     country = request.args.get("country")
     if country:
         filter_q["country"] = {"$regex": re.escape(country), "$options": "i"}
+    else:
+        # Importer desk strictly isolates foreign overseas buyers: India is origin/supplier
+        filter_q["country"] = {"$ne": "India"}
 
     city = request.args.get("city")
     if city:

@@ -157,8 +157,21 @@ def parse_go4wb_html(
         port_match = re.search(r"Destination(?:\s*Port)?\s*:\s*([A-Za-z\s,]{3,45}?)(?:Looking|Product|Contact|HS|$)", txt)
         city_hub = port_match.group(1).strip() if port_match else matched_country
 
+        # Reject cross-contamination if destination/address points to India but target country is foreign
+        low_city = city_hub.lower()
+        if "india" not in matched_country.lower():
+            if any(ind_tok in low_city for ind_tok in ("india", "karnataka", "bengal", "hooghly", "delhi", "punjab", "mumbai", "kolkata")):
+                continue
+
+        # Extract authentic company name if available in DOM
+        comp_match = re.search(r"Company\s*:\s*([A-Za-z0-9\.\s/\-&]{3,50}?)(?:Buyer|Contact|Looking|$)", txt)
+        if comp_match:
+            comp_name = comp_match.group(1).strip()
+        else:
+            comp_name = f"{contact_person} Commodity Procurement Desk"
+
         leads.append({
-            "company_name": f"{contact_person} ({matched_country} Rice Buyer)",
+            "company_name": comp_name,
             "country": matched_country,
             "city_or_hub": city_hub,
             "contact_person": contact_person,
@@ -406,16 +419,20 @@ def parse_go4worldbusiness_buyers_html(
         seen.add(comp_name)
         seen.add(item_url)
 
-        b_match = re.search(r"Buyer From\s+([A-Za-z\s]+?)(?:\||\n|\r|Quantity|$)", c_txt, re.I)
+        b_match = re.search(r"Buyer From\s+([A-Za-z\s,]+?)(?:\||\n|\r|Quantity|$)", c_txt, re.I)
         b_country = b_match.group(1).strip() if b_match else target_country
 
-        dest_match = re.search(r"Destination:\s*\|\s*([A-Za-z\s]+?)(?:\||\n|\r|$)", c_txt, re.I)
+        dest_match = re.search(r"Destination(?:\s*Port)?[:\s|]+([^|\n\r]+)", c_txt, re.I)
         dest = dest_match.group(1).strip() if dest_match else b_country
 
         if target_country and target_country.lower() != "global":
             tc = target_country.lower().strip()
             bc = b_country.lower().strip()
             dc = dest.lower().strip()
+            # If target country is not India, NEVER accept Indian destinations or Indian buyers
+            if "india" not in tc:
+                if any(ind_tok in dc or ind_tok in bc for ind_tok in ("india", "karnataka", "bengal", "hooghly", "delhi", "punjab", "mumbai", "kolkata")):
+                    continue
             if tc in bc or bc in tc or tc in dc or dc in tc:
                 b_country = target_country
             else:

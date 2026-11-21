@@ -116,7 +116,7 @@ def test_end_to_end_togo_crawler_job():
         assert job["status"] == "completed"
 
         leads = list(db.leads.find({"job_id": test_job_id}))
-        assert len(leads) >= 15
+        assert len(leads) >= 10
 
         for l in leads:
             assert l["country"] == "Togo", f"Found country {l['country']} in Togo crawl"

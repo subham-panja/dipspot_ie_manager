@@ -186,3 +186,64 @@ class TestDeduplicationBetweenTitlesAndCleanNames:
         score, reason, fields = calculate_lead_similarity(candidate, existing)
         assert score >= 95.0, f"Expected deduplication similarity >= 95%, got {score} (Reason: {reason})"
         assert "website" in fields or "company_name" in fields
+
+
+class TestGo4WorldBusinessCleanParsing:
+    """Verifies that Go4WorldBusiness parsing rejects Indian cross-contamination and synthetic buyer names."""
+
+    def test_rejects_indian_destination_when_target_is_foreign(self):
+        from app.scrapers.importers import parse_go4worldbusiness_buyers_html
+        html = """
+        <div class="entity-rows-container">
+            <a href="/buylead/view/999123/rice-wanted.html">Wanted : Non Basmati Rice</a>
+            <div>Buyer From Bahrain | Quantity Required: | 50 MT | Payment Terms: | LC | Destination: | Karnataka, India</div>
+        </div>
+        """
+        leads = parse_go4worldbusiness_buyers_html(html, target_country="Bahrain", commodity="Rice")
+        assert len(leads) == 0, "Lead with Destination: Karnataka, India must NEVER be accepted under Bahrain!"
+
+    def test_no_synthetic_rice_buyer_company_name(self):
+        from app.scrapers.importers import parse_go4wb_html
+        html = """
+        <div class="card">
+            <div>Wanted : Non Basmati Rice IR64 Buyer From United Arab Emirates</div>
+            <div>Contact : Farhan Sheikh Buyer Of Rice</div>
+            <div>Destination : Jebel Ali Port, United Arab Emirates</div>
+        </div>
+        """
+        leads = parse_go4wb_html(html, target_countries=["United Arab Emirates"])
+        assert len(leads) >= 1
+        for ld in leads:
+            assert "Rice Buyer" not in ld["company_name"], f"Synthetic '(Rice Buyer)' found in company_name: {ld['company_name']}"
+            assert "Farhan Sheikh" in ld["company_name"] or "Commodity" in ld["company_name"]
+
+
+class TestSaveLeadsWithDedupRoleIntegrity:
+    """Verifies _save_leads_with_dedup enforces strict buyer vs supplier isolation."""
+
+    def test_reclassifies_indian_entities_to_suppliers(self):
+        from app.factory import create_app
+        from app.tasks import _save_leads_with_dedup
+        from app.db import get_db
+
+        app = create_app("testing")
+        with app.app_context():
+            db = get_db()
+            db.leads.delete_many({"company_name": "Test Bengal Mill"})
+
+            cand = [{
+                "company_name": "Test Bengal Mill",
+                "country": "India",
+                "address": "Burdwan, West Bengal, India",
+                "city_or_hub": "Burdwan",
+                "lead_type": "importer",  # Incorrectly labeled as importer
+                "matched_varieties": "IR-64 Parboiled",
+                "priority_score": 85,
+            }]
+
+            _save_leads_with_dedup(app, cand, custom_label="Test Role Check")
+            saved = db.leads.find_one({"company_name": "Test Bengal Mill"})
+            assert saved is not None
+            assert saved["lead_type"] == "wb_mill", f"Indian entity must be saved as 'wb_mill', not 'importer'! Got: {saved['lead_type']}"
+            db.leads.delete_many({"company_name": "Test Bengal Mill"})
+
