@@ -40,6 +40,7 @@ interface Deal {
   country: string;
   commodity: string;
   quantity_mt: number;
+  value_usd?: number;
   incoterm: string;
   payment_terms: string;
   stage_id: string;
@@ -136,6 +137,7 @@ export default function PipelineKanbanPage() {
     country: 'United Arab Emirates',
     commodity: 'IR-64 Parboiled Rice 5% Broken',
     quantity_mt: 250,
+    value_usd: 117500,
     incoterm: 'CIF Jebel Ali Port',
     payment_terms: '100% Irrevocable L/C at Sight',
     stage_id: 'inquiry',
@@ -201,6 +203,7 @@ export default function PipelineKanbanPage() {
         country: 'United Arab Emirates',
         commodity: 'IR-64 Parboiled Rice 5% Broken',
         quantity_mt: 250,
+        value_usd: 117500,
         incoterm: 'CIF Jebel Ali Port',
         payment_terms: '100% Irrevocable L/C at Sight',
         stage_id: 'inquiry',
@@ -309,7 +312,16 @@ export default function PipelineKanbanPage() {
     return matchesSearch && matchesCountry;
   });
 
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(val);
+  };
+
   const totalQuantity = filteredDeals.reduce((sum, d) => sum + (d.quantity_mt || 0), 0);
+  const totalValue = filteredDeals.reduce((sum, d) => sum + (d.value_usd ?? (d.quantity_mt || 0) * 470), 0);
   const countries = Array.from(new Set(deals.map((d) => d.country).filter(Boolean)));
 
   return (
@@ -389,8 +401,12 @@ export default function PipelineKanbanPage() {
             ))}
           </select>
         </div>
-        <div className="text-xs text-slate-400">
-          Showing <strong className={isLight ? 'text-slate-800' : 'text-white'}>{filteredDeals.length}</strong> active deals ({totalQuantity.toLocaleString()} MT)
+        <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+          <span>Active Deals: <strong className={isLight ? 'text-slate-800' : 'text-white'}>{filteredDeals.length}</strong></span>
+          <span>&bull;</span>
+          <span>Pipeline Value: <strong className="text-emerald-400 font-mono font-bold">{formatCurrency(totalValue)}</strong></span>
+          <span>&bull;</span>
+          <span className="font-mono">({totalQuantity.toLocaleString()} MT)</span>
         </div>
       </div>
 
@@ -441,17 +457,22 @@ export default function PipelineKanbanPage() {
                       className="w-2.5 h-2.5 rounded-full"
                       style={{ backgroundColor: stage.color || '#10b981' }}
                     />
-                    <h3 className={`text-xs font-bold tracking-wide truncate max-w-[150px] ${
+                    <h3 className={`text-xs font-bold tracking-wide truncate max-w-[135px] ${
                       isLight ? 'text-slate-800' : 'text-white'
                     }`}>
                       {stage.name}
                     </h3>
                   </div>
-                  <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                    isLight ? 'bg-slate-100 text-slate-700' : 'bg-slate-800 text-slate-300'
-                  }`}>
-                    {stageDeals.length}
-                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className={`text-[11px] font-mono font-bold px-2 py-0.2 rounded-full ${
+                      isLight ? 'bg-slate-100 text-slate-700' : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {stageDeals.length}
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-400 font-semibold mt-0.5">
+                      {formatCurrency(stageDeals.reduce((sum, d) => sum + (d.value_usd ?? (d.quantity_mt || 0) * 470), 0))}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Drop Indicator when dragging over */}
@@ -520,8 +541,11 @@ export default function PipelineKanbanPage() {
                           </div>
 
                           <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">
-                            <span className="truncate">{deal.country}</span>
-                            <span className="font-mono text-slate-500 font-semibold">{deal.quantity_mt} MT</span>
+                            <span className="truncate max-w-[110px]">{deal.country}</span>
+                            <div className="flex items-center gap-1 font-mono">
+                              <span className="text-emerald-400 font-bold">{formatCurrency(deal.value_usd ?? (deal.quantity_mt || 0) * 470)}</span>
+                              <span className="text-slate-500 font-semibold">({deal.quantity_mt} MT)</span>
+                            </div>
                           </div>
 
                           {/* Quick Move Dropdown */}
@@ -736,13 +760,26 @@ export default function PipelineKanbanPage() {
                     type="number"
                     required
                     value={formData.quantity_mt}
-                    onChange={(e) => setFormData({ ...formData, quantity_mt: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const q = Number(e.target.value);
+                      setFormData({ ...formData, quantity_mt: q, value_usd: q * 470 });
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 text-white px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1 text-slate-300">Contract Value (USD)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={formData.value_usd}
+                    onChange={(e) => setFormData({ ...formData, value_usd: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 text-emerald-400 font-mono px-3 py-2 rounded-lg outline-none focus:border-emerald-500"
+                  />
+                </div>
                 <div>
                   <label className="block font-semibold mb-1 text-slate-300">Incoterms</label>
                   <input
@@ -844,6 +881,12 @@ export default function PipelineKanbanPage() {
               <div className={`p-4 rounded-xl border text-xs space-y-2 ${
                 isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
               }`}>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Contract Value:</span>
+                  <span className="font-bold text-emerald-400 font-mono text-sm">
+                    {formatCurrency(selectedDeal.value_usd ?? selectedDeal.quantity_mt * 470)}
+                  </span>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Commodity:</span>
                   <span className="font-semibold text-white">{selectedDeal.commodity}</span>
@@ -879,6 +922,23 @@ export default function PipelineKanbanPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Activity Log (Stage transitions and audit notes) */}
+              {selectedDeal.notes && selectedDeal.notes.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-slate-800/40">
+                  <h4 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-blue-400" />
+                    Deal Activity & Transition Log
+                  </h4>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {selectedDeal.notes.map((n, idx) => (
+                      <div key={idx} className="text-[11px] bg-slate-950/70 border border-slate-800/70 rounded-lg p-2 font-mono text-slate-300">
+                        {n}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Interactive Comments Section */}
               <div className="space-y-3 pt-2">

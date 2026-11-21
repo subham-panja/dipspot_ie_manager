@@ -36,16 +36,18 @@ def now_iso() -> str:
 
 
 DEFAULT_PIPELINE_STAGES = [
-    {"stage_id": "inquiry", "name": "Inquiry / RFQ Received", "order": 1, "color": "#3b82f6", "description": "Customer inquiry or RFQ logged"},
-    {"stage_id": "sample_sent", "name": "Grain Spec & Sample Sent", "order": 2, "color": "#8b5cf6", "description": "Physical rice sample / spec sheet dispatched"},
-    {"stage_id": "price_quoted", "name": "FOB/CIF Quote Submitted", "order": 3, "color": "#f59e0b", "description": "Commercial quotation sent with payment terms"},
-    {"stage_id": "contract_signed", "name": "Sales Contract / PI Signed", "order": 4, "color": "#10b981", "description": "Proforma Invoice & Sales contract confirmed"},
-    {"stage_id": "lc_opened", "name": "LC Opened / Payment Confirmed", "order": 5, "color": "#06b6d4", "description": "Irrevocable LC received and authenticated via bank"},
-    {"stage_id": "production", "name": "Milling, Bagging & QC", "order": 6, "color": "#6366f1", "description": "Paddy milling, sortexing and container stuffing"},
-    {"stage_id": "inspection", "name": "Pre-Shipment Inspection (SGS)", "order": 7, "color": "#ec4899", "description": "Third-party surveyor lab test & fit-to-load cert"},
-    {"stage_id": "customs_bl", "name": "Port Clearance & BL Issued", "order": 8, "color": "#14b8a6", "description": "Customs clearance passed and Bill of Lading released"},
-    {"stage_id": "closed_won", "name": "Closed Won (Completed)", "order": 9, "color": "#22c55e", "description": "Goods delivered and final settlement closed", "is_terminal": True},
-    {"stage_id": "closed_lost", "name": "Closed Lost", "order": 10, "color": "#ef4444", "description": "Deal lost or cancelled", "is_terminal": True},
+    {"stage_id": "new_lead", "name": "New Lead", "order": 1, "color": "#64748b", "description": "New prospective lead identified from international directories or customs registry"},
+    {"stage_id": "qualified", "name": "Qualified", "order": 2, "color": "#0ea5e9", "description": "Verified importer with confirmed trade requirement and valid contact dossier"},
+    {"stage_id": "inquiry", "name": "RFQ Received", "order": 3, "color": "#3b82f6", "description": "Customer inquiry or RFQ logged with target volume and incoterms"},
+    {"stage_id": "price_quoted", "name": "CIF Quoted", "order": 4, "color": "#f59e0b", "description": "Commercial CIF quotation submitted with payment terms and spec sheets"},
+    {"stage_id": "sample_sent", "name": "Sample Sent", "order": 5, "color": "#8b5cf6", "description": "Physical grain sample and third-party laboratory test certificates dispatched"},
+    {"stage_id": "contract_signed", "name": "Contract / PI Signed", "order": 6, "color": "#10b981", "description": "Proforma Invoice & Sales contract confirmed by buyer"},
+    {"stage_id": "lc_opened", "name": "LC Issued", "order": 7, "color": "#06b6d4", "description": "Irrevocable LC received and authenticated via international bank"},
+    {"stage_id": "production", "name": "Milling, Bagging & QC", "order": 8, "color": "#6366f1", "description": "Paddy milling, sortexing and container stuffing at accredited mill"},
+    {"stage_id": "inspection", "name": "Pre-Shipment Inspection (SGS)", "order": 9, "color": "#ec4899", "description": "Third-party surveyor lab test & fit-to-load cert"},
+    {"stage_id": "customs_bl", "name": "Port Clearance & BL Issued", "order": 10, "color": "#14b8a6", "description": "Customs clearance passed and Bill of Lading released"},
+    {"stage_id": "closed_won", "name": "Closed Won (Completed)", "order": 11, "color": "#22c55e", "description": "Goods delivered and final settlement closed", "is_terminal": True},
+    {"stage_id": "closed_lost", "name": "Closed Lost", "order": 12, "color": "#ef4444", "description": "Deal lost or cancelled", "is_terminal": True},
 ]
 
 DEFAULT_SHIPMENT_STAGES = [
@@ -104,6 +106,17 @@ def init_db(db: Optional[Database] = None):
             doc["is_active"] = True
             doc["is_terminal"] = s.get("is_terminal", False)
             db.master_stages.insert_one(doc)
+    else:
+        for s in DEFAULT_PIPELINE_STAGES:
+            doc = dict(s)
+            doc["type"] = "pipeline"
+            doc["is_active"] = True
+            doc["is_terminal"] = s.get("is_terminal", False)
+            db.master_stages.update_one(
+                {"type": "pipeline", "stage_id": s["stage_id"]},
+                {"$set": doc},
+                upsert=True
+            )
 
     if db.master_stages.count_documents({"type": "shipment"}) == 0:
         for s in DEFAULT_SHIPMENT_STAGES:
@@ -263,6 +276,8 @@ def seed_demo_data(db: Optional[Database] = None) -> dict:
                 "sent_count": 84,
                 "opened_count": 52,
                 "replied_count": 18,
+                "bounced_count": 3,
+                "interested_count": 12,
                 "conversions_count": 5,
                 "created_at": now_iso(),
                 "updated_at": now_iso(),
@@ -280,6 +295,8 @@ def seed_demo_data(db: Optional[Database] = None) -> dict:
                 "sent_count": 32,
                 "opened_count": 28,
                 "replied_count": 11,
+                "bounced_count": 1,
+                "interested_count": 8,
                 "conversions_count": 3,
                 "created_at": now_iso(),
                 "updated_at": now_iso(),

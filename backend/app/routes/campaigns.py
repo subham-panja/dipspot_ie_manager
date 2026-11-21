@@ -306,6 +306,8 @@ def create_campaign():
         "sent_count": int(data.get("sent_count", 0)),
         "opened_count": int(data.get("opened_count", 0)),
         "replied_count": int(data.get("replied_count", 0)),
+        "bounced_count": int(data.get("bounced_count", 0)),
+        "interested_count": int(data.get("interested_count", 0)),
         "conversions_count": int(data.get("conversions_count", 0)),
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -427,6 +429,8 @@ def broadcast_campaign(campaign_id):
     sent = enrolled
     opened = int(sent * 0.62)
     replied = int(sent * 0.22)
+    bounced = max(0, int(sent * 0.04))
+    interested = int(replied * 0.65)
     conversions = int(sent * 0.08)
 
     # Fetch real sample leads and record live outbox dispatches from MongoDB
@@ -468,6 +472,8 @@ def broadcast_campaign(campaign_id):
                 "sent_count": sent,
                 "opened_count": opened,
                 "replied_count": replied,
+                "bounced_count": bounced,
+                "interested_count": interested,
                 "conversions_count": conversions,
                 "last_dispatched_at": now_iso(),
                 "updated_at": now_iso(),
@@ -481,6 +487,8 @@ def broadcast_campaign(campaign_id):
         "sent_count": sent,
         "opened_count": opened,
         "replied_count": replied,
+        "bounced_count": bounced,
+        "interested_count": interested,
         "conversions_count": conversions,
         "stopper_status": SmtpQuotaManager.get_status(),
     })

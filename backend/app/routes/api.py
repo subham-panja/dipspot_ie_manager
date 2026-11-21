@@ -157,8 +157,9 @@ def serialize_mongo_lead(doc: dict) -> dict:
         contact_label = contact_person.split("(")[0].strip() or "Purchase Manager"
         com_name = company_name.split("(")[0].strip() or "your company"
         v_name = varieties[0] if varieties else "IR-64 Parboiled Rice"
+        hs_code_str = doc.get("hs_codes_applicable") or "HS 100630"
         wa_text = urllib.parse.quote_plus(
-            f"Hello {contact_label}, we noticed {com_name} actively imports 1-3 containers of {v_name} via {n_port}. "
+            f"Hello {contact_label}, we noticed {com_name} actively imports 1-3 containers of {v_name} ({hs_code_str}) via {n_port}. "
             f"We are an APEDA-accredited rice mill in West Bengal exporting Non-Basmati Parboiled IR-64 & 1121 Basmati. "
             f"We would like to share our current CIF quote and lab inspection specifications. May we send the specification sheet?"
         )

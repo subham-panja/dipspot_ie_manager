@@ -243,3 +243,131 @@ def test_manual_lead_creation_and_persistence(test_app):
     assert created["shipment_volume"] == "1-3 Containers / mo (25-75 MT)"
     assert created["twitter_url"] == "https://x.com/apexgrain_togo"
     assert "wa.me/22890123456" in created["whatsapp_outreach_url"]
+
+
+def test_full_kanban_pipeline_stages_and_order(test_app):
+    """Verify that full deal pipeline contains all required Kanban stages in logical order."""
+    client = test_app.test_client()
+    resp = client.get("/api/pipeline/stages")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    stages = data.get("stages", [])
+    stage_ids = [s["stage_id"] for s in stages]
+
+    # Verify all stages from original task are present
+    assert "new_lead" in stage_ids
+    assert "qualified" in stage_ids
+    assert "inquiry" in stage_ids
+    assert "price_quoted" in stage_ids
+    assert "sample_sent" in stage_ids
+    assert "lc_opened" in stage_ids
+    assert "closed_won" in stage_ids
+    assert "closed_lost" in stage_ids
+
+    # Verify relative order
+    assert stage_ids.index("new_lead") < stage_ids.index("qualified")
+    assert stage_ids.index("qualified") < stage_ids.index("inquiry")
+    assert stage_ids.index("inquiry") < stage_ids.index("price_quoted")
+    assert stage_ids.index("price_quoted") < stage_ids.index("sample_sent")
+    assert stage_ids.index("sample_sent") < stage_ids.index("lc_opened")
+    assert stage_ids.index("lc_opened") < stage_ids.index("closed_won")
+
+
+def test_pipeline_deal_currency_value_and_activity_logging(test_app):
+    """Verify deal creation calculates value_usd, logs stage transitions to notes, and marks lead in_pipeline."""
+    client = test_app.test_client()
+    deal_payload = {
+        "title": "75 MT IR-64 - Gulf Rice Trading FZE",
+        "company_name": "Gulf Rice Trading FZE",
+        "country": "United Arab Emirates",
+        "commodity": "IR-64 Parboiled Rice 5% Broken",
+        "quantity_mt": 75,
+        "value_usd": 35250.0,
+        "incoterm": "CIF Jebel Ali Port",
+        "payment_terms": "100% Irrevocable L/C at Sight",
+        "stage_id": "qualified",
+        "lead_id": 999901,
+        "notes": ["Initial customer qualification completed via WhatsApp call"],
+    }
+    resp = client.post("/api/pipeline/deals", json=deal_payload)
+    assert resp.status_code == 201
+    deal = resp.get_json()["deal"]
+    deal_id = deal["deal_id"]
+    assert deal["value_usd"] == 35250.0
+    assert deal["stage_id"] == "qualified"
+
+    # Verify lead was marked in_pipeline
+    mongo_db = get_db()
+    lead = mongo_db.leads.find_one({"id": 999901})
+    assert lead["deal_status"] == "in_pipeline"
+
+    # Move stage: qualified -> price_quoted
+    patch_resp = client.patch(
+        f"/api/pipeline/deals/{deal_id}",
+        json={"stage_id": "price_quoted", "note": "CIF quotation $470/MT submitted to buyer desk"},
+    )
+    assert patch_resp.status_code == 200
+    updated_deal = patch_resp.get_json()["deal"]
+    assert updated_deal["stage_id"] == "price_quoted"
+
+    # Verify transition logged in notes
+    notes = updated_deal.get("notes", [])
+    assert any("Stage transitioned" in n for n in notes)
+    assert any("CIF quotation" in n for n in notes)
+
+    # Clean up deal
+    client.delete(f"/api/pipeline/deals/{deal_id}?permanent=true")
+
+
+def test_campaign_analytics_bounced_and_interested(test_app):
+    """Verify campaign creation and broadcast record sent, opened, replied, bounced, and interested metrics."""
+    client = test_app.test_client()
+    camp_payload = {
+        "name": "West Africa Parboiled Bulk Push",
+        "channel": "Email",
+        "target_commodity": "IR-64 Parboiled Rice",
+        "target_countries": ["Togo", "Ghana", "Benin"],
+        "enrolled_leads_count": 50,
+    }
+    c_resp = client.post("/api/campaigns", json=camp_payload)
+    assert c_resp.status_code == 201
+    campaign = c_resp.get_json()["campaign"]
+    c_id = campaign["campaign_id"]
+    assert campaign["bounced_count"] == 0
+    assert campaign["interested_count"] == 0
+
+    # Broadcast campaign
+    b_resp = client.post(f"/api/campaigns/{c_id}/broadcast")
+    assert b_resp.status_code == 200
+    b_data = b_resp.get_json()
+    assert b_data["sent_count"] == 50
+    assert b_data["opened_count"] > 0
+    assert b_data["replied_count"] > 0
+    assert b_data["bounced_count"] >= 0
+    assert b_data["interested_count"] >= 0
+
+    # Verify persisted in database
+    mongo_db = get_db()
+    saved_camp = mongo_db.campaigns.find_one({"campaign_id": c_id})
+    assert saved_camp["sent_count"] == 50
+    assert saved_camp["bounced_count"] == b_data["bounced_count"]
+    assert saved_camp["interested_count"] == b_data["interested_count"]
+
+    # Clean up campaign
+    client.delete(f"/api/campaigns/{c_id}")
+
+
+def test_whatsapp_outreach_hs_code_and_cif_quote(test_app):
+    """Verify that generated WhatsApp outreach URLs contain customized CIF quotes and HS code references."""
+    client = test_app.test_client()
+    resp = client.get("/api/leads/importers?country=United%20Arab%20Emirates&job_id=99999")
+    assert resp.status_code == 200
+    importers = resp.get_json()["importers"]
+    assert len(importers) >= 1
+    uae_lead = importers[0]
+    wa_url = uae_lead.get("whatsapp_outreach_url", "")
+    assert wa_url.startswith("https://wa.me/")
+    # Must reference CIF quote and HS code
+    assert "CIF" in wa_url
+    assert "1006" in wa_url
+

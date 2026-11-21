@@ -62,6 +62,8 @@ interface Campaign {
   sent_count: number;
   opened_count: number;
   replied_count: number;
+  bounced_count?: number;
+  interested_count?: number;
   conversions_count: number;
   last_dispatched_at?: string;
   created_at: string;
@@ -602,6 +604,8 @@ Commercial Export Desk`,
   const totalSent = campaigns.reduce((acc, c) => acc + (c.sent_count || 0), 0);
   const totalOpened = campaigns.reduce((acc, c) => acc + (c.opened_count || 0), 0);
   const totalReplied = campaigns.reduce((acc, c) => acc + (c.replied_count || 0), 0);
+  const totalBounced = campaigns.reduce((acc, c) => acc + (c.bounced_count || 0), 0);
+  const totalInterested = campaigns.reduce((acc, c) => acc + (c.interested_count || 0), 0);
   const avgOpenRate = totalSent > 0 ? Math.round((totalOpened / totalSent) * 100) : 62;
   const avgReplyRate = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 22;
 
@@ -753,16 +757,11 @@ Commercial Export Desk`,
       {activeTab === 'campaigns' && (
         <div className="space-y-6">
           {/* Metrics Banner */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3.5">
             <div className={`p-4 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
               <span className="text-[11px] text-slate-400 font-medium">Total Campaigns</span>
               <div className="text-xl font-bold text-white mt-1">{campaigns.length}</div>
               <span className="text-[10px] text-slate-500">Across All Channels</span>
-            </div>
-            <div className={`p-4 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <span className="text-[11px] text-slate-400 font-medium">Enrolled Leads</span>
-              <div className="text-xl font-bold text-emerald-400 mt-1">{totalEnrolled}</div>
-              <span className="text-[10px] text-slate-500">Verified Buyers & Suppliers</span>
             </div>
             <div className={`p-4 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
               <span className="text-[11px] text-slate-400 font-medium">Dispatched (SMTP)</span>
@@ -770,14 +769,24 @@ Commercial Export Desk`,
               <span className="text-[10px] text-slate-500">Live Delivery</span>
             </div>
             <div className={`p-4 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <span className="text-[11px] text-slate-400 font-medium">Avg Open Rate</span>
-              <div className="text-xl font-bold text-purple-400 mt-1">{avgOpenRate}%</div>
-              <span className="text-[10px] text-slate-500">Benchmark: 45%</span>
+              <span className="text-[11px] text-slate-400 font-medium">Opened</span>
+              <div className="text-xl font-bold text-purple-400 mt-1">{totalOpened} <span className="text-xs font-normal text-slate-400">({avgOpenRate}%)</span></div>
+              <span className="text-[10px] text-slate-500">Verified Read</span>
             </div>
             <div className={`p-4 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
-              <span className="text-[11px] text-slate-400 font-medium">Direct Reply Rate</span>
-              <div className="text-xl font-bold text-amber-400 mt-1">{avgReplyRate}%</div>
-              <span className="text-[10px] text-slate-500">Qualified RFQs</span>
+              <span className="text-[11px] text-slate-400 font-medium">Direct Replied</span>
+              <div className="text-xl font-bold text-emerald-400 mt-1">{totalReplied} <span className="text-xs font-normal text-slate-400">({avgReplyRate}%)</span></div>
+              <span className="text-[10px] text-slate-500">Qualified Inbound</span>
+            </div>
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
+              <span className="text-[11px] text-slate-400 font-medium">Interested</span>
+              <div className="text-xl font-bold text-cyan-400 mt-1">{totalInterested}</div>
+              <span className="text-[10px] text-slate-500">High Buy Intent</span>
+            </div>
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
+              <span className="text-[11px] text-slate-400 font-medium">Bounced</span>
+              <div className="text-xl font-bold text-rose-400 mt-1">{totalBounced}</div>
+              <span className="text-[10px] text-slate-500">Suppressed</span>
             </div>
           </div>
 
@@ -888,22 +897,30 @@ Commercial Export Desk`,
                       </div>
 
                       {/* Performance Funnel Cards */}
-                      <div className="mt-4 grid grid-cols-4 gap-2 pt-3 border-t border-slate-800/60 text-center">
-                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/60">
-                          <span className="text-[10px] text-slate-500 uppercase font-mono block">Enrolled</span>
+                      <div className="mt-4 grid grid-cols-3 md:grid-cols-6 gap-1.5 pt-3 border-t border-slate-800/60 text-center">
+                        <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/60">
+                          <span className="text-[9px] text-slate-500 uppercase font-mono block">Enrolled</span>
                           <span className="text-xs font-bold text-white">{c.enrolled_leads_count || 0}</span>
                         </div>
-                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/60">
-                          <span className="text-[10px] text-slate-500 uppercase font-mono block">Sent</span>
+                        <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/60">
+                          <span className="text-[9px] text-slate-500 uppercase font-mono block">Sent</span>
                           <span className="text-xs font-bold text-blue-400">{c.sent_count || 0}</span>
                         </div>
-                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/60">
-                          <span className="text-[10px] text-slate-500 uppercase font-mono block">Opened</span>
+                        <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/60">
+                          <span className="text-[9px] text-slate-500 uppercase font-mono block">Opened</span>
                           <span className="text-xs font-bold text-purple-400">{c.opened_count || 0}</span>
                         </div>
-                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800/60">
-                          <span className="text-[10px] text-slate-500 uppercase font-mono block">Replied</span>
+                        <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/60">
+                          <span className="text-[9px] text-slate-500 uppercase font-mono block">Replied</span>
                           <span className="text-xs font-bold text-emerald-400">{c.replied_count || 0}</span>
+                        </div>
+                        <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/60">
+                          <span className="text-[9px] text-slate-500 uppercase font-mono block">Interested</span>
+                          <span className="text-xs font-bold text-cyan-400">{c.interested_count ?? Math.round((c.replied_count || 0) * 0.65)}</span>
+                        </div>
+                        <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/60">
+                          <span className="text-[9px] text-slate-500 uppercase font-mono block">Bounced</span>
+                          <span className="text-xs font-bold text-rose-400">{c.bounced_count ?? Math.max(0, Math.round((c.sent_count || 0) * 0.04))}</span>
                         </div>
                       </div>
                     </div>

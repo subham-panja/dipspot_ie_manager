@@ -187,7 +187,7 @@ function VerifiedSuppliersContent() {
       if (urlJobId) params.append('job_id', urlJobId);
       params.append('sort_by', sortBy);
     }
-    return `http://localhost:5001/api/leads/export/${fmt}?${params.toString()}`;
+    return `${API_BASE}/leads/export/${fmt}?${params.toString()}`;
   };
 
   // Multi-Select Checkboxes Handlers

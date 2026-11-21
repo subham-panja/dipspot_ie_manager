@@ -112,7 +112,7 @@ def create_deal():
         "stage_name": stage_name,
         "commodity": data.get("commodity", "IR-64 Parboiled Rice"),
         "quantity_mt": float(data.get("quantity_mt", 100)),
-        "value_usd": float(data.get("value_usd", 45000)),
+        "value_usd": float(data.get("value_usd", float(data.get("quantity_mt", 100)) * 470)),
         "incoterm": data.get("incoterm", "CIF Jebel Ali"),
         "payment_terms": data.get("payment_terms", "100% Irrevocable L/C at Sight"),
         "probability": int(data.get("probability", 50)),
@@ -123,9 +123,17 @@ def create_deal():
     }
     db.deals.insert_one(doc)
 
-    # If lead_id is provided, mark lead as in_pipeline
+    # If lead_id is provided, mark lead as in_pipeline across id or ObjectId
     if data.get("lead_id"):
-        db.leads.update_one({"id": int(data["lead_id"]) if str(data["lead_id"]).isdigit() else data["lead_id"]}, {"$set": {"deal_status": "in_pipeline"}})
+        from bson import ObjectId
+        lid = data["lead_id"]
+        conds = []
+        if str(lid).isdigit():
+            conds.append({"id": int(lid)})
+        conds.append({"id": str(lid)})
+        if ObjectId.is_valid(str(lid)):
+            conds.append({"_id": ObjectId(str(lid))})
+        db.leads.update_one({"$or": conds}, {"$set": {"deal_status": "in_pipeline"}})
 
     return jsonify({"deal": serialize_doc(doc), "message": "Deal created successfully"}), 201
 
@@ -162,10 +170,14 @@ def update_deal(deal_id):
     # If stage updated, refresh stage_name and log transition
     if "stage_id" in data and data["stage_id"] != deal.get("stage_id"):
         stage_doc = db.master_stages.find_one({"type": "pipeline", "stage_id": data["stage_id"]})
+        new_stage_name = stage_doc.get("name") if stage_doc else data["stage_id"].replace("_", " ").title()
         update_fields["stage_id"] = data["stage_id"]
-        update_fields["stage_name"] = stage_doc.get("name") if stage_doc else data["stage_id"]
-
-    if "note" in data and data["note"]:
+        update_fields["stage_name"] = new_stage_name
+        old_st = deal.get("stage_name") or deal.get("stage_id", "inquiry")
+        transition_msg = f"Stage transitioned: {old_st} -> {new_stage_name}"
+        user_note = f" - {data['note']}" if data.get("note") else ""
+        db.deals.update_one({"deal_id": deal_id}, {"$push": {"notes": f"[{now_iso()[:16]}] {transition_msg}{user_note}"}})
+    elif "note" in data and data["note"]:
         db.deals.update_one({"deal_id": deal_id}, {"$push": {"notes": f"[{now_iso()[:16]}] {data['note']}"}})
 
     db.deals.update_one({"deal_id": deal_id}, {"$set": update_fields})

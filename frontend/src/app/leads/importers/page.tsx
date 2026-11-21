@@ -6,7 +6,7 @@ import Link from 'next/link';
 import Shell from '@/components/Shell';
 import PageLeftNav, { PageSubNavItem } from '@/components/PageLeftNav';
 import CustomerDossier from '@/components/CustomerDossier';
-import { fetchJson } from '@/lib/api';
+import { fetchJson, API_BASE } from '@/lib/api';
 import { useTheme } from '@/context/ThemeContext';
 import {
   Globe,
@@ -224,7 +224,7 @@ function GlobalImportersContent() {
       if (urlJobId) params.append('job_id', urlJobId);
       params.append('sort_by', sortBy);
     }
-    return `http://localhost:5001/api/leads/export/${fmt}?${params.toString()}`;
+    return `${API_BASE}/leads/export/${fmt}?${params.toString()}`;
   };
 
   // Multi-Select Checkbox Handlers (Twenty CRM pattern)
