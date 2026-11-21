@@ -221,3 +221,4 @@ class TestSourcesCatalogExpansion:
             url = src.get("url", "")
             # Sources must have real, valid domains
             assert not any(bad in url for bad in ("example.com", "randomdomain.com", "test.com", "fake.com")), f"Mock URL in {src}"
+

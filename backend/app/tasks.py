@@ -814,7 +814,7 @@ def _generate_dynamic_importers(
 
         doc = dict(base_item)
         doc["country"] = country_name
-        doc["city_or_hub"] = city
+        doc["city_or_hub"] = f"{city}, {country_name}" if country_name.lower() not in city.lower() else city
         doc["phones"] = phone
         doc["lead_type"] = "importer"
         doc["matched_varieties"] = commodity
@@ -906,7 +906,7 @@ def _generate_dynamic_suppliers(
 
         doc = dict(base_item)
         doc["country"] = country_name
-        doc["city_or_hub"] = city
+        doc["city_or_hub"] = f"{city}, {country_name}" if country_name.lower() not in city.lower() else city
         doc["phones"] = phone
         doc["lead_type"] = "wb_mill"
         doc["matched_varieties"] = commodity
