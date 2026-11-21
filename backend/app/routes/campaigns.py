@@ -448,7 +448,7 @@ def broadcast_campaign(campaign_id):
             "campaign_id": campaign_id,
             "campaign_name": c.get("name"),
             "channel": target_channel,
-            "recipient": l.get("emails") or l.get("phones") or f"procurement@{company_name.lower().replace(' ', '')[:10]}.com",
+            "recipient": l.get("emails") or l.get("phones") or "",
             "subject": f"Commercial Offer: {c.get('target_commodity', 'Export Commodity')}",
             "body": f"Dear Sourcing Desk at {company_name},\n\nWe are direct exporters of {c.get('target_commodity', 'Certified Commodity')}.\n\nImmediate container shipment available for destination {l.get('country', '')}.",
             "status": "Delivered via Broadcast",

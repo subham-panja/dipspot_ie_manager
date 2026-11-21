@@ -88,7 +88,8 @@ def test_sanitize_lead_geography_togo():
     assert "Hooghly" not in sanitized["address"]
     assert "Arambagh" not in sanitized["address"]
     assert "Togo" in sanitized["address"]
-    assert sanitized["phones"].startswith("+228")
+    assert not sanitized["phones"].startswith("+91")
+    assert sanitized["phones"] == "" or sanitized["phones"].startswith("+228")
     assert "Lome" in sanitized["nearest_port"]
 
 
@@ -119,7 +120,8 @@ def test_end_to_end_togo_crawler_job():
 
         for l in leads:
             assert l["country"] == "Togo", f"Found country {l['country']} in Togo crawl"
-            assert l["phones"].startswith("+228"), f"Found non-Togo phone {l['phones']}"
+            assert not l["phones"].startswith("+91"), f"Found Indian phone {l['phones']} in Togo crawl"
+            assert l["phones"] == "" or l["phones"].startswith("+228"), f"Found non-Togo phone {l['phones']}"
             assert "india" not in l["address"].lower(), f"India leaked into Togo lead: {l['address']}"
             assert "bengal" not in l["address"].lower(), f"Bengal leaked into Togo lead: {l['address']}"
             assert "hooghly" not in l["address"].lower(), f"Hooghly leaked into Togo lead: {l['address']}"

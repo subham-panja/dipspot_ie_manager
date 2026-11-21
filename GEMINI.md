@@ -8,3 +8,4 @@
 3. **Buyer vs Seller Separation**: Importers are wholesale buyers/distributors. Rice mills are suppliers. Never convert a mill into an importer.
 4. **Deduplication Invariant**: B2B platforms in `SHARED_PLATFORM_AND_DIRECTORY_DOMAINS` must never trigger 98.5% exact domain similarity.
 5. **Always Test**: Run `PYTHONPATH=backend python3 -m pytest backend/tests/test_togo_strictness.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py -q` after backend edits, and `npm run build` inside `frontend/` after frontend edits.
+

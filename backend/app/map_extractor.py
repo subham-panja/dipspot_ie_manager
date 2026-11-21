@@ -155,11 +155,11 @@ def search_google_maps_places(
         if has_foreign or target_country.lower() not in addr.lower():
             addr = f"{v_lead.get('district') or 'Commercial Logistics Hub'}, {city_name}, {target_country}"
 
-        # Phone resolution: enforce authentic country calling code
+        # Phone resolution: enforce authentic country calling code, never synthesize fake digits
         phone = v_lead.get("phones", "")
-        if not phone.startswith(c_profile["phone_code"]):
+        if phone and not phone.startswith(c_profile["phone_code"]):
             raw_digits = re.sub(r"[^\d]", "", phone)
-            phone = f"{c_profile['phone_code']} {raw_digits[:3]} {raw_digits[3:9]}" if len(raw_digits) >= 9 else f"{c_profile['phone_code']} 22 21{i:04d}"
+            phone = f"{c_profile['phone_code']} {raw_digits[:3]} {raw_digits[3:9]}" if len(raw_digits) >= 9 else ""
 
         lat_offset = random.uniform(-0.008, 0.008) * (radius_km / 20.0)
         lng_offset = random.uniform(-0.008, 0.008) * (radius_km / 20.0)

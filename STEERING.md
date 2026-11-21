@@ -145,15 +145,23 @@ flowchart TD
 
 ### Key Execution Steps:
 1. **Source Resolution**: The crawler resolves the country profile via `resolve_country_profile(country)` to get authentic cities, phone codes, coordinates, and ports.
-2. **Strict Directory Routing**:
+2. **Strict Directory & Registry Routing**:
    - `crawl_indiamart()` is **only** executed if the country is India. It returns `[]` for any other country.
    - `crawl_go4worldbusiness()` handles global buyers and verified international suppliers across multi-page RFQ feeds.
-3. **Geographic Sanitization (`sanitize_lead_geography`)**:
+   - **APEDA Integration (`apeda.gov.in`)**: When querying for buyers/importers in the Middle East & Africa, routes to `crawl_apeda_middle_east_buyers()`; when querying for Indian suppliers/millers, routes to `crawl_apeda_rcmc_exporters()`.
+3. **Legal Company Name Cleaning (`clean_company_name`)**:
+   - Raw SERP web titles (e.g. `Al Maya Supermarkets LLC | Dubai FMCG & Food Importers | Official Site`) are parsed via multi-delimiter chunk scoring (`|`, ` - `, ` – `, ` — `, `•`, `·`, `::`).
+   - Corporate legal suffixes (`LLC`, `FZE`, `Ltd`, `GmbH`, `SARL`, `Pte Ltd`, `Pvt Ltd`, `SA`) and trade nouns (`Supermarket`, `Trading`, `Foods`, `Agro`) receive weighted scoring, while SEO taglines, consumer headlines, and directory categories (`Wholesale Rice Market in Delhi...`) are automatically disqualified.
+   - Company keys in ML deduplication (`clean_company_key`) pipe through `clean_company_name` to guarantee raw web page titles and cleaned company records normalize to identical deduplication hashes.
+4. **Strict Buyer vs Supplier Separation**:
+   - Importer queries automatically append negative boolean operators (`-exporter -exporting -manufacturer`) to search engine dorks.
+   - Candidate verification in `is_trade_business_entity` rejects Indian exporters, export mills, and manufacturer signals when `lead_type == "importer"`.
+5. **Geographic Sanitization & Zero Pseudo-Phones (`sanitize_lead_geography`)**:
    - Checks every lead's address for foreign country tokens (e.g. `india`, `bengal`, `hooghly`, `arambagh`, `dubai`, `uae`).
    - If an address is foreign, it replaces it with an authentic address in the target country (`Commercial Trade Terminal, <City>, <Country>`).
-   - Formats phone numbers with the target country calling code (`+228`, `+971`, `+966`, `+91`).
+   - **Zero Synthetic / Pseudo-Phone Generation**: Never manufactures random digits (e.g. `22 21xxxx` or `4 2988850`). If a foreign or invalid phone is detected, it is cleared to `""`.
    - Resolves the nearest port to an authentic gateway port in that country.
-4. **95% Deduplication Engine**:
+6. **95% Deduplication Engine**:
    - `calculate_lead_similarity()` scores candidates.
    - If domain is in `SHARED_PLATFORM_AND_DIRECTORY_DOMAINS`, domain similarity is `0.0%` unless the canonical path is identical and company name similarity $\ge 65\%$.
    - Distinct companies from B2B directories are preserved, preventing the 2-lead deduplication bottleneck.
@@ -243,7 +251,7 @@ cd frontend && npm run dev
 Always run tests before committing code:
 ```bash
 # Run all core verification & strictness tests
-PYTHONPATH=backend python3 -m pytest backend/tests/test_togo_strictness.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py -q
+PYTHONPATH=backend python3 -m pytest backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_togo_strictness.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py -q
 
 # Run frontend production build
 cd frontend && npm run build
@@ -258,6 +266,9 @@ cd frontend && npm run build
 | **Crawling 200 leads yields only 2 leads** | `calculate_lead_similarity` treated directory host domains (`indiamart.com`, `go4worldbusiness.com`) as company domains with 98.5% match. | Ensure directory domains are in `SHARED_PLATFORM_AND_DIRECTORY_DOMAINS` in `lead_engine.py`. |
 | **Indian rice mill saved under Togo** | Fallback in `get_verified_trade_leads` appended foreign entries when country pool had $< 200$ items. | Strict country filtering in `verified_catalog.py` and `sanitize_lead_geography()` in `real_scraper.py`. |
 | **Domestic rice mill labeled as an importer** | `doc["lead_type"]` was forcibly overwritten without filtering base candidates by their actual business type. | Ensure `is_sup` filtering in `verified_catalog.py` prevents mills from entering importer pools. |
+| **Raw website title appears as Company Name** | Web search candidates used raw `<title>` tags containing taglines, delimiters, and categories. | `clean_company_name()` in `lead_engine.py` evaluates delimiter chunks with corporate suffix scoring and filters SEO fluff. |
+| **Pseudo-random or synthesized phone digits** | Legacy fallbacks hashed company names into dummy phone numbers (`22 21xxxx`, `4 2988850`). | Removed all pseudo-generators in `map_extractor.py`, `real_scraper.py`, `tasks.py`, and `verified_catalog.py`. Empty strings `""` are retained when unverified. |
+| **Indian exporters appearing in overseas buyer searches** | Exporter SEO dorks targeted foreign keywords. | Negative keyword filtering (`-exporter -exporting -manufacturer`) added to crawler dorks and buyer validation in `is_trade_business_entity()`. |
 | **Campaign label stuck on "Dubai Basmati"** | `customLabel` in `crawler/page.tsx` had a static default value. | `useEffect` dynamically recalculates `${country} ${commodity} ${lType} Q1 Harvest`. |
 | **Search engines blocking automated queries** | Search engine rate limits or bot challenges on DuckDuckGo / Bing. | Multi-Proxy Shield rotates 7+ free proxies with automatic fallback to direct B2B directory harvesting. |
 
@@ -270,3 +281,4 @@ To expand coverage for a new trade corridor (e.g. Ivory Coast, Brazil, Turkey):
 2. **Verified Catalog**: Add authentic registered enterprises in `VERIFIED_GLOBAL_ENTERPRISES` in `backend/app/verified_catalog.py` with DNS-resolvable domains and real trade specs.
 3. **Frontend Preset**: Add the country option to the select dropdown in `frontend/src/app/crawler/page.tsx`.
 4. **Validation Test**: Add a test in `backend/tests/` asserting 100% strict country accuracy and zero foreign leakage.
+

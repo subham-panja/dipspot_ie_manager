@@ -58,3 +58,4 @@ You are working on **TradePulse EXIM (`dipspot_ie_manager`)**, a high-performanc
 | **Frontend Pipeline Kanban Board** | `frontend/src/app/pipeline/page.tsx` |
 
 For full architectural blueprints, schemas, and flowcharts, see [STEERING.md](file:///Users/subhampanja/Desktop/subham/web-scrapper/STEERING.md).
+

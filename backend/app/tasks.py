@@ -794,11 +794,11 @@ def _generate_dynamic_importers(
         )
         base_item = v_leads[0]
 
-        # Ensure phone starts with country calling code
+        # Ensure phone starts with country calling code, never fabricate fake numbers
         phone = base_item.get("phones", "")
-        if not phone.startswith(phone_code):
+        if phone and not phone.startswith(phone_code):
             raw_phone = re.sub(r"[^\d]", "", phone)
-            phone = f"{phone_code} {raw_phone[:3]} {raw_phone[3:9]}" if len(raw_phone) >= 9 else f"{phone_code} 4 2988850"
+            phone = f"{phone_code} {raw_phone[:3]} {raw_phone[3:9]}" if len(raw_phone) >= 9 else ""
 
         matched_sources = get_importer_sources(country_name, selected_ids=selected_sources)
         if not matched_sources and selected_sources:
@@ -888,9 +888,9 @@ def _generate_dynamic_suppliers(
         base_item = v_leads[0]
 
         phone = base_item.get("phones", "")
-        if not phone.startswith(phone_code):
+        if phone and not phone.startswith(phone_code):
             raw_phone = re.sub(r"[^\d]", "", phone)
-            phone = f"{phone_code} {raw_phone[:3]} {raw_phone[3:9]}" if len(raw_phone) >= 9 else f"{phone_code} 4 2988850"
+            phone = f"{phone_code} {raw_phone[:3]} {raw_phone[3:9]}" if len(raw_phone) >= 9 else ""
 
         matched_sources = get_supplier_sources(country_name, selected_ids=selected_sources)
         if not matched_sources and selected_sources:

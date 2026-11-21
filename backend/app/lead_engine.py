@@ -161,10 +161,143 @@ def decode_gstin_and_fssai(text: str) -> Tuple[str, str, str]:
     return gstin, pan, fssai
 
 
+def clean_company_name(raw_name: str) -> str:
+    """
+    Intelligently extracts and normalizes a corporate entity name from raw search result titles,
+    DOM headings, or B2B directory listings.
+    
+    Eliminates:
+    - Trailing/leading SEO slogans ('| Best Price', '- Online Grocery Shopping', 'Buy Rice Online')
+    - Plural trade categories ('Rice Exporters in India', 'Basmati Rice Suppliers')
+    - Page actions & navigation ('Home | ...', 'Contact Us - ...', 'Order Now')
+    - Redundant parentheticals and domain suffixes
+    """
+    if not raw_name:
+        return ""
+    
+    import html as html_lib
+    name = html_lib.unescape(raw_name.strip())
+    name = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2015]", "-", name)
+    name = re.sub(r"[\u2018\u2019]", "'", name)
+    name = re.sub(r"[\u201C\u201D]", '"', name)
+    name = re.sub(r"\s+", " ", name).strip()
+    
+    # Check if whole title is a known SEO question, article, tutorial, or search category
+    low_full = name.lower()
+    if any(low_full.startswith(p) for p in ("how to", "what is", "why ", "where to", "top 10", "best 10", "list of", "must try")):
+        if not any(sep in name for sep in ("|", " - ", " – ", " — ", "•", "·", "::")):
+            return ""
+
+    GENERIC_CATEGORY_DISCARDS = [
+        r"\b(?:top|best|leading|list\s+of|find)\s+\d*\s*(?:rice|exporters|suppliers|manufacturers|millers)",
+        r"\b(?:rice\s+exporters|rice\s+suppliers|rice\s+manufacturers|rice\s+millers)\s+(?:in|from)\s+[a-z]+",
+        r"\b(?:basmati|non\s+basmati)\s+rice\s+(?:exporters|suppliers|manufacturers)",
+        r"\b(?:buy|order)\s+rice\s+online",
+        r"\bwholesale\s+(?:\w+\s+)?(?:market|distributors|suppliers)\s+(?:in|from)\s+[a-z]+",
+        r"^rice\s+exporters\s+in\s+india$",
+        r"^exporters\s+in\s+india$",
+        r"\b(?:mandi\s+rates?|mandi\s+prices?|wholesale\s+rice\s+prices?)\b",
+    ]
+    for pat in GENERIC_CATEGORY_DISCARDS:
+        if re.search(pat, low_full) and not any(sep in name for sep in ("|", " - ", " – ", " — ", "•", "·", "::")):
+            return ""
+
+    # Strip parenthetical annotations like (Hooghly Cluster), (Foodstuff Wholesale), etc., unless legal form like (Pvt Ltd)
+    def clean_paren(match):
+        inner = match.group(1).lower()
+        if any(re.search(r"\b" + corp + r"\b", inner) for corp in ("pvt", "ltd", "llc", "sarl", "gmbh", "inc", "corp", "sa")):
+            return match.group(0)
+        return ""
+    name = re.sub(r"\s*\(([^)]+)\)", clean_paren, name).strip()
+
+    # Split title by common delimiters: "|", " - ", " – ", " — ", " • ", " · ", " :: ", " : "
+    chunks = re.split(r"\s+[|•·]\s+|\s+[-–—]\s+|::|\s+:\s+", name)
+    chunks = [c.strip() for c in chunks if c.strip()]
+    if not chunks:
+        return ""
+
+    if len(chunks) == 1:
+        single = chunks[0]
+        single = re.sub(r"\.(?:com|org|net|ae|in|co|gov|edu)$", "", single, flags=re.I).strip()
+        single = re.sub(r"\s+[-–—]\s+[A-Za-z\s]+$", "", single).strip()
+        for pat in GENERIC_CATEGORY_DISCARDS:
+            if re.search(pat, single.lower()):
+                return ""
+        return single
+
+    def score_chunk(chunk: str) -> float:
+        c_low = chunk.lower()
+        words = chunk.split()
+        
+        # Immediate disqualifiers:
+        if any(re.search(pat, c_low) for pat in [
+            r"^(?:home|official\s*site|official\s*website|contact\s*us|contact|about\s*us|about|overview|index|main\s*page|products|services|catalog|blog|news|portal|welcome)$",
+            r"^(?:suppliers|dealers|manufacturers|exporters|wholesalers)(\s+(?:and|&)\s+(?:dealers|suppliers|manufacturers|exporters|wholesalers))?$",
+            r"\b(?:buy\s+online|order\s+now|best\s+price|cheap\s+prices|free\s+shipping|free\s+delivery|order\s+fresh|order\s+groceries|grocery\s+shopping|online\s+shopping|same\s+day\s+delivery)\b",
+            r"\b(?:exporters\s+(?:in|from)|suppliers\s+(?:in|from)|manufacturers\s+(?:in|from)|dealers\s+(?:in|from)|wholesalers\s+(?:in|from)|leading\s+exporter|top\s+exporter|leading\s+rice)\b",
+            r"\b(?:rice\s+exporters|rice\s+suppliers|rice\s+manufacturers|rice\s+millers|basmati\s+rice|non\s+basmati\s+rice)\b",
+            r"\b(?:buy\s+rice|order\s+rice|wholesale\s+prices|wholesale\s+(?:\w+\s+)?market|rice\s+brands|indian\s+rice\s+brands|best\s+rice\s+brands|mandi\s+rates?)\b",
+            r"\b(?:how\s+to|what\s+is|why\s+|where\s+to|recipes?|calories|definition|meaning\s+of)\b",
+            r"\b(?:login|sign\s*in|register|search\s+results|all\s+rights\s+reserved)\b",
+            r"\b(?:online\s+supermarket\s+in|supermarket\s+in|grocery\s+in|online\s+grocery)\b",
+        ]):
+            return -100.0
+
+        score = 15.0
+        # Positive signals: Corporate suffixes
+        corp_suffixes = [
+            r"\b(?:llc|l\.l\.c\.|ltd|limited|pvt|inc|corp|corporation)\b",
+            r"\b(?:sarl|s\.a\.r\.l\.|gmbh|b\.v\.|bv|sa|s\.a\.|pjsc|jsc)\b",
+            r"\b(?:wll|w\.l\.l\.|fze|fzco|dmcc|llp|est|establishment|spc)\b",
+        ]
+        for pat in corp_suffixes:
+            if re.search(pat, c_low):
+                score += 50.0
+
+        corp_nouns = [
+            r"\b(?:group|holdings|enterprises|industries|trading|general\s+trading)\b",
+            r"\b(?:foods|foodstuff|foodstuffs|supermarket|supermarkets|hypermarket|cash\s*&\s*carry)\b",
+            r"\b(?:agro|mills|mill|millers|international|exports|imports|farms|logistics|terminal)\b",
+        ]
+        for pat in corp_nouns:
+            if re.search(pat, c_low):
+                score += 35.0
+
+        # Preference for reasonable brand lengths (1-5 words, 4-40 chars)
+        if 1 <= len(words) <= 4:
+            score += 20.0
+        elif len(words) > 6:
+            score -= 25.0
+
+        if 4 <= len(chunk) <= 35:
+            score += 15.0
+        elif len(chunk) > 55:
+            score -= 30.0
+
+        # Proper casing
+        if any(w[0].isupper() for w in words if len(w) > 1):
+            score += 10.0
+
+        return score
+
+    scored_chunks = [(c, score_chunk(c)) for c in chunks]
+    valid_chunks = [sc for sc in scored_chunks if sc[1] > -30.0]
+    if not valid_chunks:
+        return ""
+
+    valid_chunks.sort(key=lambda x: x[1], reverse=True)
+    best_chunk = valid_chunks[0][0]
+    best_chunk = re.sub(r"^(?:Welcome\s+to|Official\s+Site\s+of)\s+", "", best_chunk, flags=re.I).strip()
+    best_chunk = re.sub(r"\.(?:com|org|net|ae|in|co|gov|edu)$", "", best_chunk, flags=re.I).strip()
+    best_chunk = re.sub(r"\s+[-–—]\s+(?:UAE|Dubai|India|Togo|USA|UK|Kolkata)$", "", best_chunk, flags=re.I).strip()
+    return best_chunk.strip()
+
+
 def clean_company_key(name: str) -> str:
-    n = (name or "").lower()
+    cleaned = clean_company_name(name) if name else ""
+    n = (cleaned or name or "").lower()
     n = re.sub(
-        r"\b(pvt\.?|private|ltd\.?|limited|llc|l\.l\.c\.?|w\.l\.l\.?|wll|fze|fzco|dmcc|est\.?|co\.?|company|corp\.?|inc\.?|llp|m/s)\b",
+        r"\b(pvt\.?|private|ltd\.?|limited|llc|l\.l\.c\.?|w\.l\.l\.?|wll|fze|fzco|dmcc|est\.?|co\.?|company|corp\.?|inc\.?|llp|m/s|uae|dubai|india)\b",
         " ",
         n,
     )
