@@ -29,6 +29,9 @@ import {
   MapPin,
   ShieldCheck,
   Tag,
+  Ship,
+  Package,
+  MessageCircle,
 } from 'lucide-react';
 
 interface Importer {
@@ -57,6 +60,13 @@ interface Importer {
   custom_label?: string;
   job_id?: number;
   created_at: string;
+  shipment_volume?: string;
+  importer_tier?: string;
+  nearest_port?: string;
+  customs_manifest_data?: string;
+  whatsapp_outreach_url?: string;
+  linkedin_search_url?: string;
+  google_maps_url?: string;
 }
 
 interface ImportersResponse {
@@ -94,6 +104,8 @@ function GlobalImportersContent() {
 
   // Filters
   const [country, setCountry] = useState(urlCountry || '');
+  const [port, setPort] = useState(searchParams?.get('port') || '');
+  const [tier, setTier] = useState(searchParams?.get('tier') || '');
   const [minScore, setMinScore] = useState<number | ''>('');
   const [search, setSearch] = useState('');
 
@@ -128,6 +140,8 @@ function GlobalImportersContent() {
       params.append('per_page', '15');
       const effectiveCountry = country || urlCountry;
       if (effectiveCountry) params.append('country', effectiveCountry);
+      if (port) params.append('port', port);
+      if (tier) params.append('tier', tier);
       if (minScore) params.append('min_score', String(minScore));
       if (search.trim()) params.append('search', search.trim());
       if (urlCustomLabel) params.append('custom_label', urlCustomLabel);
@@ -150,7 +164,7 @@ function GlobalImportersContent() {
 
   useEffect(() => {
     loadImporters(page);
-  }, [page, country, minScore, urlCustomLabel, urlJobId, urlCountry]);
+  }, [page, country, port, tier, minScore, urlCustomLabel, urlJobId, urlCountry]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -187,12 +201,52 @@ function GlobalImportersContent() {
   const navItems: PageSubNavItem[] = [
     {
       id: 'importers',
-      label: 'Importers & Buyers',
+      label: 'All Importers & Buyers',
       icon: <Globe className="w-4 h-4" />,
       badge: total,
-      href: '/leads/importers',
-      active: true,
+      onClick: () => { setTier(''); setPort(''); setCountry(''); setPage(1); },
+      active: !tier && !port,
       desc: 'Global wholesale buyers',
+    },
+    {
+      id: 'customs_sme',
+      label: 'Customs Manifests (1-3 FCL)',
+      icon: <Ship className="w-4 h-4 text-cyan-400" />,
+      onClick: () => { setTier('sme'); setPage(1); },
+      active: tier === 'sme',
+      desc: 'SME buyers (no conglomerates)',
+    },
+    {
+      id: 'port_jebel_ali',
+      label: '🇦🇪 Jebel Ali Port (UAE)',
+      icon: <Ship className="w-4 h-4 text-blue-400" />,
+      onClick: () => { setPort('Jebel Ali'); setPage(1); },
+      active: port === 'Jebel Ali',
+      desc: 'Dubai & Northern Emirates',
+    },
+    {
+      id: 'port_kbs',
+      label: '🇧🇭 Khalifa Bin Salman',
+      icon: <Ship className="w-4 h-4 text-rose-400" />,
+      onClick: () => { setPort('Khalifa Bin Salman'); setPage(1); },
+      active: port === 'Khalifa Bin Salman',
+      desc: 'Bahrain Milled Rice Consignees',
+    },
+    {
+      id: 'port_dammam',
+      label: '🇸🇦 King Abdulaziz (Dammam)',
+      icon: <Ship className="w-4 h-4 text-emerald-400" />,
+      onClick: () => { setPort('Dammam'); setPage(1); },
+      active: port === 'Dammam',
+      desc: 'Saudi Eastern Province',
+    },
+    {
+      id: 'port_mombasa',
+      label: '🇰🇪 Port of Mombasa',
+      icon: <Ship className="w-4 h-4 text-amber-400" />,
+      onClick: () => { setPort('Mombasa'); setPage(1); },
+      active: port === 'Mombasa',
+      desc: 'Kenya & East Africa Hub',
     },
     {
       id: 'suppliers',
@@ -367,6 +421,32 @@ function GlobalImportersContent() {
               <option value="80">Score 80+ (Tier 1)</option>
               <option value="60">Score 60+ (Active)</option>
             </select>
+
+            <select
+              value={port}
+              onChange={(e) => { setPort(e.target.value); setPage(1); }}
+              className={`text-xs px-3 py-1.5 rounded-lg border outline-none ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-slate-200'
+              }`}
+            >
+              <option value="">All Discharge Ports</option>
+              <option value="Jebel Ali">🇦🇪 Jebel Ali Port (UAE)</option>
+              <option value="Khalifa Bin Salman">🇧🇭 Khalifa Bin Salman (Bahrain)</option>
+              <option value="Dammam">🇸🇦 King Abdulaziz Port / Dammam</option>
+              <option value="Mombasa">🇰🇪 Port of Mombasa (Kenya)</option>
+              <option value="Lome">🇹🇬 Autonomous Port of Lomé (Togo)</option>
+            </select>
+
+            <select
+              value={tier}
+              onChange={(e) => { setTier(e.target.value); setPage(1); }}
+              className={`text-xs px-3 py-1.5 rounded-lg border outline-none font-semibold ${
+                tier === 'sme' ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10' : (isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-950 border-slate-800 text-slate-200')
+              }`}
+            >
+              <option value="">All Consignment Sizes</option>
+              <option value="sme">🎯 SME Importers (1-3 Containers / mo)</option>
+            </select>
           </div>
 
           <form onSubmit={handleSearchSubmit} className="relative w-full md:w-72">
@@ -438,6 +518,12 @@ function GlobalImportersContent() {
                               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                             </span>
                           </div>
+                          {cust.shipment_volume && (
+                            <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-mono font-medium">
+                              <Ship className="w-2.5 h-2.5 shrink-0" />
+                              <span>{cust.shipment_volume}</span>
+                            </div>
+                          )}
                           {cust.website && (
                             <a
                               href={cust.website.startsWith('http') ? cust.website : `https://${cust.website}`}
@@ -463,6 +549,12 @@ function GlobalImportersContent() {
                         <div className="font-medium text-slate-200">
                           {cust.city ? `${cust.city}, ` : (cust.city_or_hub ? `${cust.city_or_hub}, ` : '')}{cust.country}
                         </div>
+                        {cust.nearest_port && (
+                          <div className="text-[10px] text-cyan-400 font-mono flex items-center gap-1 mt-0.5 truncate max-w-[190px]" title={cust.nearest_port}>
+                            <Ship className="w-2.5 h-2.5 shrink-0" />
+                            <span className="truncate">{cust.nearest_port.split("(")[0].trim()}</span>
+                          </div>
+                        )}
                         {cust.address && (
                           <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={cust.address}>
                             {cust.address}
@@ -471,15 +563,30 @@ function GlobalImportersContent() {
                       </td>
 
                       <td className="py-3 px-3">
-                        <div className="font-medium text-slate-300">
-                          {cust.contact_person || 'Commercial Buyer Desk'}
+                        <div className="font-medium text-slate-200">
+                          {cust.contact_person || 'Purchase Manager'}
                         </div>
+                        {cust.linkedin_search_url && (
+                          <a
+                            href={cust.linkedin_search_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-[11px] text-[#0a66c2] hover:underline flex items-center gap-1 font-semibold mt-0.5"
+                            title="Find Purchase Manager on LinkedIn"
+                          >
+                            <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24">
+                              <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9v8.37H9.2V10.9H6.46M7.83 6.45a1.62 1.62 0 1 0 0 3.24 1.62 1.62 0 0 0 0-3.24Z" />
+                            </svg>
+                            <span>LinkedIn Profile</span>
+                          </a>
+                        )}
                         {(cust.email || cust.emails) && (
                           <a
                             href={`mailto:${(cust.email || cust.emails || '').split(';')[0].trim()}`}
-                            className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[180px]"
+                            className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[180px] mt-0.5"
                           >
-                            <Mail className="w-3 h-3 text-slate-500" />
+                            <Mail className="w-3 h-3 text-slate-500 shrink-0" />
                             <span className="truncate">{(cust.email || cust.emails || '').split(';')[0].trim()}</span>
                           </a>
                         )}
@@ -487,9 +594,24 @@ function GlobalImportersContent() {
 
                       <td className="py-3 px-3 font-mono text-slate-300">
                         {(cust.phone || cust.phones) ? (
-                          <div className="flex items-center gap-1 text-[11px]">
-                            <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
-                            <span>{(cust.phone || cust.phones || '').split(';')[0].trim()}</span>
+                          <div>
+                            <div className="flex items-center gap-1 text-[11px]">
+                              <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span>{(cust.phone || cust.phones || '').split(';')[0].trim()}</span>
+                            </div>
+                            {cust.whatsapp_outreach_url && (
+                              <a
+                                href={cust.whatsapp_outreach_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="mt-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 shadow-sm transition w-fit font-sans"
+                                title="Message on WhatsApp with pre-filled CIF quote intro"
+                              >
+                                <MessageCircle className="w-3 h-3 shrink-0" />
+                                <span>WhatsApp Buyer</span>
+                              </a>
+                            )}
                           </div>
                         ) : (
                           <span className="text-slate-600 text-[11px]">N/A</span>

@@ -251,7 +251,7 @@ cd frontend && npm run dev
 Always run tests before committing code:
 ```bash
 # Run all core verification & strictness tests
-PYTHONPATH=backend python3 -m pytest backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_togo_strictness.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py -q
+PYTHONPATH=backend python3 -m pytest backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_togo_strictness.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
 
 # Run frontend production build
 cd frontend && npm run build
@@ -281,4 +281,31 @@ To expand coverage for a new trade corridor (e.g. Ivory Coast, Brazil, Turkey):
 2. **Verified Catalog**: Add authentic registered enterprises in `VERIFIED_GLOBAL_ENTERPRISES` in `backend/app/verified_catalog.py` with DNS-resolvable domains and real trade specs.
 3. **Frontend Preset**: Add the country option to the select dropdown in `frontend/src/app/crawler/page.tsx`.
 4. **Validation Test**: Add a test in `backend/tests/` asserting 100% strict country accuracy and zero foreign leakage.
+
+---
+
+## 9. The "Reverse-Engineer" Customs Data Strategy (HS 100630)
+
+TradePulse EXIM includes a dedicated reverse-engineering pipeline for public shipping manifests and Bill of Lading (B/L) customs data:
+
+### Strategy Mechanics:
+1. **HS Code Target**: Strictly targets `HS 100630` (semi-milled or wholly milled rice, whether or not polished or glazed, including Parboiled IR-64 and 1121 Basmati).
+2. **Target Discharge Ports**:
+   - **Jebel Ali Port (AEJEA)**, United Arab Emirates
+   - **Khalifa Bin Salman Port (BHKBS)**, Bahrain
+   - **King Abdulaziz Port (SADMM)**, Dammam, Saudi Arabia
+   - **Port of Mombasa (KEMBA)**, Kenya
+   - **Autonomous Port of Lome (TGLFW)**, Togo
+3. **SME Volume Filter (1 to 3 Containers / month, 25 to 75 MT)**:
+   - Giant conglomerates (Olam, LuLu Group, Al Ghurair, Bunge, Cargill, Almarai, Savola) are explicitly blacklisted in `GIANT_CONGLOMERATES`.
+   - Small-to-mid importers (foodstuff trading LLCs, regional spice distributors, private supermarket groups) import 1-3 FCL monthly. They deal directly with millers without bureaucratic RFP procurement cycles.
+4. **Decision-Maker Enrichment & One-Click Outreach**:
+   - `whatsapp_outreach_url`: Pre-populated `wa.me` links containing a persuasive, personalized CIF export quote proposal with target port, grain varieties, and inspection terms.
+   - `linkedin_search_url`: Targeted LinkedIn people search string finding `{Company Name} Purchase Manager` or `Owner`.
+   - `google_maps_url`: Direct POI coordinate verification for warehouse/storefront confirmation.
+5. **UI Integration**:
+   - **Crawler Stepper**: 1-Click Strategy Preset card in Step 1 pre-populates HS 100630, discharge ports, SME depth, and customs dorks.
+   - **Importers Desk**: Discharge port filter, SME volume badges, 1-Click WhatsApp outreach, and LinkedIn profile search.
+   - **Customer Dossier**: Interactive Customs Manifest Consignment card with volume, SME badge, and direct WhatsApp CIF pitch trigger.
+
 

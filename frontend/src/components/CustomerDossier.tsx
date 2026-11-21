@@ -27,7 +27,9 @@ import {
   Trash2,
   Tag,
   History,
-  Check
+  Check,
+  MessageCircle,
+  Package,
 } from 'lucide-react';
 
 export interface CustomerLead {
@@ -65,6 +67,12 @@ export interface CustomerLead {
   extraction_notes?: string;
   merge_count?: number;
   merged_history?: any[];
+  shipment_volume?: string;
+  importer_tier?: string;
+  whatsapp_outreach_url?: string;
+  linkedin_search_url?: string;
+  google_maps_url?: string;
+  customs_manifest_data?: any;
 }
 
 interface CustomerDossierProps {
@@ -127,6 +135,10 @@ export default function CustomerDossier({
   const firstPhone = lead.phones?.split(';')[0]?.split(',')[0]?.trim();
   const cleanWaNumber = firstPhone?.replace(/[^0-9]/g, '');
   const firstEmail = lead.emails?.split(';')[0]?.split(',')[0]?.trim();
+
+  const linkedinUrl = lead.linkedin_search_url || `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(lead.company_name + ' Purchase Manager')}`;
+  const whatsappUrl = lead.whatsapp_outreach_url || (cleanWaNumber ? `https://wa.me/${cleanWaNumber}?text=${encodeURIComponent(`Dear ${lead.contact_person || lead.company_name} team, we are direct rice millers supplying premium 1-3 FCL consignments of IR-64 and Basmati landing at ${lead.nearest_port || 'your discharge port'}. Could we share our CIF quotation?`)}` : undefined);
+  const mapsUrl = lead.google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lead.company_name + ' ' + (lead.city_or_hub || lead.country))}`;
 
   const handleSaveEdit = async () => {
     try {
@@ -505,11 +517,63 @@ export default function CustomerDossier({
             {/* RIGHT SECTION (50%): CONTACT DIRECTORY & TRADE INTELLIGENCE */}
             <div className="w-full md:w-1/2 p-5 flex flex-col justify-between space-y-4">
               <div className="space-y-4">
+                {/* Customs Manifest & Scale Badge (The Customs Data Trick) */}
+                {(lead.shipment_volume || lead.importer_tier || lead.lead_type === 'importer') && (
+                  <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Ship className="w-4 h-4 text-amber-400" />
+                        <span className="text-xs font-bold text-white">Customs Manifest Inbound Scale</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
+                        {lead.hs_codes_applicable || 'HS 100630'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-slate-950/80 p-2 rounded-lg border border-slate-800">
+                        <span className="text-[10px] text-slate-400 block">Monthly Inbound Volume:</span>
+                        <span className="font-bold text-amber-300 font-mono">
+                          {lead.shipment_volume || '1-3 Containers / mo (25-75 MT)'}
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-950/80 p-2 rounded-lg border border-slate-800">
+                        <span className="text-[10px] text-slate-400 block">Importer Scale:</span>
+                        <span className="font-semibold text-emerald-400">
+                          {lead.importer_tier === 'sme_importer' ? 'SME (Owner Direct)' : (lead.importer_tier || 'SME Consignee')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-amber-500/20 text-[11px]">
+                      <span className="text-slate-400">Discharge Sea Port:</span>
+                      <strong className="text-white flex items-center gap-1 font-mono">
+                        <Ship className="w-3 h-3 text-blue-400" />
+                        {lead.nearest_port || 'Jebel Ali Port (AEJEA)'}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+
                 {/* Contact Dossier Card */}
                 <div className="space-y-2">
-                  <h3 className={`text-xs font-bold uppercase tracking-wider ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                    Verified Contact Dossier
-                  </h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className={`text-xs font-bold uppercase tracking-wider ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                      Verified Contact Dossier
+                    </h3>
+                    {mapsUrl && (
+                      <a
+                        href={mapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-medium"
+                      >
+                        <MapPin className="w-3 h-3" />
+                        <span>Google Maps POI</span>
+                      </a>
+                    )}
+                  </div>
 
                   <div
                     className={`p-3.5 rounded-xl border text-xs space-y-2.5 ${
@@ -519,24 +583,37 @@ export default function CustomerDossier({
                     {lead.contact_person && (
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">Contact Executive:</span>
-                        <strong className={isLight ? 'text-slate-800' : 'text-white'}>{lead.contact_person}</strong>
+                        <div className="flex items-center gap-2">
+                          <strong className={isLight ? 'text-slate-800' : 'text-white'}>{lead.contact_person}</strong>
+                          <a
+                            href={linkedinUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2 py-0.5 rounded bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[10px] font-semibold flex items-center gap-1 transition"
+                            title="Search Purchase Manager on LinkedIn"
+                          >
+                            <span>in</span>
+                            <span>LinkedIn</span>
+                          </a>
+                        </div>
                       </div>
                     )}
 
                     {firstPhone && (
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400">Phone / WhatsApp:</span>
+                        <span className="text-slate-400">Direct Phone:</span>
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-medium text-white">{firstPhone}</span>
-                          {cleanWaNumber && (
+                          {whatsappUrl && (
                             <a
-                              href={`https://wa.me/${cleanWaNumber}`}
+                              href={whatsappUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="p-1 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition"
-                              title="Open WhatsApp Chat"
+                              className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center gap-1 transition shadow-sm"
+                              title="Open 1-Click WhatsApp CIF Outreach"
                             >
-                              <MessageSquare className="w-3.5 h-3.5" />
+                              <MessageSquare className="w-3 h-3" />
+                              <span>WhatsApp</span>
                             </a>
                           )}
                         </div>

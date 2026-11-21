@@ -39,6 +39,7 @@ import {
   CheckSquare,
   Square,
   Hash,
+  Ship,
 } from 'lucide-react';
 
 interface CrawlerSource {
@@ -422,6 +423,19 @@ function CrawlerStepperContent() {
     setSelectedSourceIds(ids);
   };
 
+  // Preset: The Reverse-Engineer Customs Data Trick (HS 100630)
+  const applyCustomsManifestTrick = (portPreset: { country: string; city: string; portName: string }) => {
+    setLeadType('importer');
+    setCommodity('Non-Basmati & Parboiled Rice (HS 100630)');
+    setSelectedCountryPreset(portPreset.country);
+    setCity(portPreset.city);
+    setCustomLabel(`HS 100630 Manifest - ${portPreset.portName} (1-3 FCL SMEs)`);
+    setDepth(50);
+    setExtractionNotes(`The Reverse-Engineer Customs Data Trick: Target small-to-mid importers (1-3 containers/month, 25-75 MT) of HS 100630 rice landing at ${portPreset.portName}. Exclude giant conglomerates.`);
+    setEnableGoogleDork(true);
+    setCustomDorkQuery(`site:volza.com OR site:zauba.com OR site:importgenius.com "HS 100630" "${portPreset.portName}" "importer"`);
+  };
+
   // Clone/Populate parameters from history run
   const cloneHistoricalRun = (run: CrawlerJob) => {
     if (run.custom_label) setCustomLabel(`${run.custom_label} (Re-run)`);
@@ -584,6 +598,52 @@ function CrawlerStepperContent() {
               <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                 Zero Mock Invariant Active
               </span>
+            </div>
+
+            {/* Quick Strategy Preset Card: The Reverse-Engineer Customs Data Trick */}
+            <div className="p-4 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400 font-bold shrink-0">
+                    <Ship className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-bold text-white">
+                        Strategy Preset: The &quot;Reverse-Engineer&quot; Customs Data Trick
+                      </h3>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono font-bold">
+                        HS 100630 &bull; 1-3 FCL/mo
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Crawl public shipping manifests &amp; Bill of Lading records for SME rice buyers (1 to 3 containers / mo). Excludes giant conglomerates. Pitch directly to Owner / Purchase Manager via WhatsApp.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Port Chips */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-amber-500/20">
+                <span className="text-[11px] font-semibold text-slate-400">Target Landing Ports:</span>
+                {[
+                  { country: 'United Arab Emirates', city: 'Jebel Ali / Dubai', portName: 'Jebel Ali (UAE)', flag: '🇦🇪' },
+                  { country: 'Bahrain', city: 'Manama / Hidd', portName: 'Khalifa Bin Salman (Bahrain)', flag: '🇧🇭' },
+                  { country: 'Saudi Arabia', city: 'Dammam', portName: 'King Abdulaziz / Dammam (Saudi Arabia)', flag: '🇸🇦' },
+                  { country: 'Kenya', city: 'Mombasa', portName: 'Port of Mombasa (Kenya)', flag: '🇰🇪' },
+                  { country: 'Togo', city: 'Lome', portName: 'Port of Lome (Togo)', flag: '🇹🇬' },
+                ].map((p) => (
+                  <button
+                    key={p.portName}
+                    type="button"
+                    onClick={() => applyCustomsManifestTrick(p)}
+                    className="text-[11px] px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-medium transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    <span>{p.flag}</span>
+                    <span>{p.portName}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Form Fields Grid */}

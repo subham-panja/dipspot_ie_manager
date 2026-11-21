@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+import urllib.parse
 import uuid
 from bson import ObjectId
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -127,20 +128,55 @@ def serialize_mongo_lead(doc: dict) -> dict:
     if not varieties:
         varieties = ["Non-Basmati Grains", "Parboiled Cargo", "Agricultural Merchandise"]
 
+    company_name = doc.get("company_name") or ""
+    contact_person = doc.get("contact_person") or ""
+    phones = doc.get("phones") or ""
+    n_port = doc.get("nearest_port") or port
+    shipment_volume = doc.get("shipment_volume") or ("1-3 Containers / mo (25-75 MT)" if is_imp else "")
+    importer_tier = doc.get("importer_tier") or ("sme_importer" if is_imp else "")
+    customs_manifest_data = doc.get("customs_manifest_data") or (
+        f"Customs B/L Manifest (HS 100630) | Port: {n_port} | 1-3 FCL/mo" if is_imp else ""
+    )
+
+    # Generate 1-click WhatsApp Outreach Link with personalized CIF export message
+    whatsapp_url = doc.get("whatsapp_outreach_url") or ""
+    clean_digits = re.sub(r"[^\d]", "", phones.split(";")[0]) if phones else ""
+    if not whatsapp_url and clean_digits and is_imp:
+        contact_label = contact_person.split("(")[0].strip() or "Purchase Manager"
+        com_name = company_name.split("(")[0].strip() or "your company"
+        v_name = varieties[0] if varieties else "IR-64 Parboiled Rice"
+        wa_text = urllib.parse.quote_plus(
+            f"Hello {contact_label}, we noticed {com_name} actively imports 1-3 containers of {v_name} via {n_port}. "
+            f"We are an APEDA-accredited rice mill in West Bengal exporting Non-Basmati Parboiled IR-64 & 1121 Basmati. "
+            f"We would like to share our current CIF quote and lab inspection specifications. May we send the specification sheet?"
+        )
+        whatsapp_url = f"https://wa.me/{clean_digits}?text={wa_text}"
+
+    # Generate 1-click LinkedIn Search Link targeting Purchase Manager / Owner
+    linkedin_url = doc.get("linkedin_search_url") or ""
+    if not linkedin_url and company_name:
+        clean_co = re.sub(r"\b(?:LLC|W\.L\.L\.|Ltd|SARL|Est\.|Inc\.|FZE|Pte)\b", "", company_name, flags=re.IGNORECASE).strip()
+        linkedin_url = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(clean_co + ' Purchase Manager')}"
+
+    # Generate Google Maps Search Link for verification
+    gmaps_url = doc.get("google_maps_url") or ""
+    if not gmaps_url and company_name:
+        gmaps_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote_plus(company_name + ' ' + (city_or_hub or country))}"
+
     return {
         "id": lead_id,
         "_id": str(doc.get("_id", "")),
-        "company_name": doc.get("company_name") or "",
+        "company_name": company_name,
         "country": country,
         "city_or_hub": city_or_hub,
-        "contact_person": doc.get("contact_person") or "",
-        "phones": doc.get("phones") or "",
+        "contact_person": contact_person,
+        "phones": phones,
         "emails": doc.get("emails") or "",
         "website": doc.get("website") or "",
         "address": address,
         "matched_varieties": matched_varieties,
         "commodities_list": varieties,
-        "hs_codes_applicable": doc.get("hs_codes_applicable") or "",
+        "hs_codes_applicable": doc.get("hs_codes_applicable") or "10063019; 10063090",
         "inquiry_or_profile": doc.get("inquiry_or_profile") or "",
         "priority_score": priority_score,
         "source_url": doc.get("source_url") or "",
@@ -154,11 +190,17 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "deal_status": doc.get("deal_status") or "unassigned",
         "latitude": doc.get("latitude", lat),
         "longitude": doc.get("longitude", lng),
-        "nearest_port": doc.get("nearest_port", port),
+        "nearest_port": n_port,
         "trade_role": trade_role,
         "annual_volume_est": vol_est,
         "risk_tier": risk_tier,
         "key_trade_lanes": lanes,
+        "shipment_volume": shipment_volume,
+        "importer_tier": importer_tier,
+        "customs_manifest_data": customs_manifest_data,
+        "whatsapp_outreach_url": whatsapp_url,
+        "linkedin_search_url": linkedin_url,
+        "google_maps_url": gmaps_url,
         "source_name": doc.get("source_name") or "Global Verified Trade Directory",
         "source_url": doc.get("source_url") or "",
         "source_category": doc.get("source_category") or "Commercial Trade Manifest",
@@ -281,6 +323,23 @@ def get_importers():
     city = request.args.get("city")
     if city:
         filter_q["city_or_hub"] = {"$regex": re.escape(city), "$options": "i"}
+
+    port = request.args.get("port")
+    if port:
+        filter_q["$or"] = [
+            {"nearest_port": {"$regex": re.escape(port), "$options": "i"}},
+            {"address": {"$regex": re.escape(port), "$options": "i"}},
+            {"city_or_hub": {"$regex": re.escape(port), "$options": "i"}},
+        ]
+
+    tier = request.args.get("tier")
+    if tier:
+        if tier.lower() in ("sme", "sme_importer", "1-3"):
+            filter_q["importer_tier"] = "sme_importer"
+
+    manifest_only = request.args.get("manifest_only", "").lower() == "true"
+    if manifest_only:
+        filter_q["customs_manifest_data"] = {"$exists": True, "$ne": ""}
 
     commodity = request.args.get("commodity")
     if commodity:

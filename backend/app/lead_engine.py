@@ -388,8 +388,15 @@ def calculate_lead_similarity(
                     return (98.5, f"Exact Directory Listing match ({c_path})", matching_fields)
         else:
             # Private corporate domain match (e.g. krbl.com == krbl.com)
-            matching_fields.append("website")
-            return (98.5, f"Exact Web Domain match ({c_dom})", matching_fields)
+            # Must verify that company names are consistent, preventing two completely distinct entities
+            # that happen to share a holding or group domain from being collapsed.
+            c_k = clean_company_key(candidate.get("company_name", ""))
+            e_k = clean_company_key(existing.get("company_name", ""))
+            sort_ratio = fuzz.token_sort_ratio(c_k, e_k) if (c_k and e_k) else 0
+            if not c_k or not e_k or sort_ratio >= 40:
+                matching_fields.append("website")
+                return (98.5, f"Exact Web Domain match ({c_dom})", matching_fields)
+            return (70.0, f"Shared domain ({c_dom}) across distinct entities", matching_fields)
 
     # 3. Phone Match (normalized digits)
     c_phones = re.sub(r"\D", "", candidate.get("phones") or "")
