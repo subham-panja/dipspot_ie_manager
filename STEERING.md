@@ -13,8 +13,8 @@
 - **Frontend**: Next.js 14 (App Router, React 18, TypeScript, Tailwind CSS, Lucide Icons).
 - **Backend**: Python 3.12 + Flask 3.1 REST API + SQLAlchemy ORM.
 - **Databases**:
-  - **MongoDB** (`mongodb://localhost:27017/trade_suite`): Primary real-time store for leads, background crawler job logs, pipeline stages, campaigns, and omnichannel inbox.
-  - **SQLite** (`backend/instance/rice_leads.db`): Secondary/sync relational store for legacy lead records and shipment tracking.
+  - **Document Store** (`trade_suite`): Primary real-time store for leads, background crawler job logs, pipeline stages, campaigns, and omnichannel inbox.
+  - **Relational DB** (`rice_leads.db`): Secondary/sync relational store for legacy lead records and shipment tracking.
 - **Background Tasks**: Python native multithreading (`tasks.py`), background crawler task runner, rotating proxy shield, and SMTP rate limiter.
 - **Testing**: `pytest` (`backend/tests/`), Next.js Production Build (`npm run build`).
 
@@ -52,7 +52,7 @@ Every AI agent, coder, tester, or reviewer working on this repository **MUST** e
 ### 5. Standard Port Allocation
 - **Backend API**: `http://localhost:5001` (Flask API routes prefixed with `/api/...`).
 - **Frontend Web**: `http://localhost:3000` (Next.js App Router).
-- **MongoDB**: `localhost:27017` (Database: `trade_suite`, Test Database: `trade_suite_test`).
+- **Document Store**: Database `trade_suite`, Test Database `trade_suite_test`.
 
 ---
 
@@ -72,7 +72,7 @@ web-scrapper/
 │   ├── app/
 │   │   ├── factory.py              # Flask app factory, CORS, and blueprint registration
 │   │   ├── config.py               # Environment configuration & HS code definitions
-│   │   ├── db.py                   # MongoDB (trade_suite) & SQLite connections
+│   │   ├── db.py                   # Database connections & sync layer
 │   │   ├── models.py               # SQLAlchemy ORM models (Lead, ScrapeJob, etc.)
 │   │   ├── verified_catalog.py     # 150+ authentic global enterprises with DNS validation
 │   │   ├── tasks.py                # Background workers & GLOBAL_COUNTRY_DATABASE (35 nations)
@@ -93,7 +93,7 @@ web-scrapper/
 │   │       ├── importers.py        # Go4WorldBusiness RFQ & buyer parsers
 │   │       └── wb_mills.py         # IndiaMART ImpCat & West Bengal mill parsers
 │   └── tests/
-│       ├── test_togo_strictness.py # Strict isolation & zero cross-contamination tests
+│       ├── test_geographic_isolation.py  # Multi-country isolation & zero cross-contamination tests
 │       ├── test_crawler_real_deep.py # Multi-category deep crawl & dedup verification
 │       ├── test_full_goal_suite.py # End-to-end goal compliance tests
 │       └── test_lead_engine.py     # Deduplication similarity logic tests
@@ -138,8 +138,8 @@ flowchart TD
     
     HarvestPipeline --> GeoSanitize["real_scraper.py: sanitize_lead_geography()"]
     GeoSanitize --> Dedup["lead_engine.py: _save_leads_with_dedup() (95% ML Match)"]
-    Dedup --> Mongo[("MongoDB: leads & crawler_jobs")]
-    Dedup --> SQLite[("SQLite: leads & scrape_jobs")]
+    Dedup --> DocStore[("Document Store: leads & crawler_jobs")]
+    Dedup --> RelDB[("Relational DB: leads & scrape_jobs")]
     Mongo --> Stream["Frontend Step 3: Live Progress, Audit Log & Live Preview Table"]
 ```
 
@@ -170,7 +170,7 @@ flowchart TD
 
 ## 5. Database Schemas
 
-### MongoDB `leads` Collection
+### `leads` Collection Schema
 ```typescript
 interface LeadDocument {
   _id: ObjectId;
@@ -202,7 +202,7 @@ interface LeadDocument {
 }
 ```
 
-### MongoDB `crawler_jobs` Collection
+### `crawler_jobs` Collection Schema
 ```typescript
 interface CrawlerJobDocument {
   _id: ObjectId;
@@ -250,8 +250,8 @@ cd frontend && npm run dev
 ### Running Tests
 Always run tests before committing code:
 ```bash
-# Run all core verification & strictness tests
-PYTHONPATH=backend python3 -m pytest backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_togo_strictness.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
+# Run all core verification, strictness & government source tests
+PYTHONPATH=backend python3 -m pytest backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
 
 # Run frontend production build
 cd frontend && npm run build
@@ -307,5 +307,30 @@ TradePulse EXIM includes a dedicated reverse-engineering pipeline for public shi
    - **Crawler Stepper**: 1-Click Strategy Preset card in Step 1 pre-populates HS 100630, discharge ports, SME depth, and customs dorks.
    - **Importers Desk**: Discharge port filter, SME volume badges, 1-Click WhatsApp outreach, and LinkedIn profile search.
    - **Customer Dossier**: Interactive Customs Manifest Consignment card with volume, SME badge, and direct WhatsApp CIF pitch trigger.
+
+---
+
+## 10. Government-Registered Sources & Port Manifest Registries
+
+To guarantee authentic company names, registration IDs, and verifiable trade volumes, TradePulse EXIM natively integrates with accredited government trade bodies and maritime port registries:
+
+### Key Government Sources:
+1. **DGFT (Directorate General of Foreign Trade, India)**:
+   - Official national registry of verified Indian exporters/importers with valid 10-digit IEC codes.
+   - Preserves legal entities, RCMC numbers, and primary maritime export gateways (Kolkata Port SMPK, Haldia Port, JNPT).
+2. **APEDA (Agricultural & Processed Food Products Export Development Authority)**:
+   - Official RCMC accredited rice millers and merchant exporters.
+   - Middle East Buyer Trade Inquiries forwarded via Indian Embassies in GCC.
+3. **FIEO (Federation of Indian Export Organisations)**:
+   - Apex trade promotion council directory of accredited premier export houses.
+
+### Maritime Port Manifest Registries:
+1. **DP World UAE / Jebel Ali Port Inward Manifests (AEJEA)**: Small-to-mid foodstuff consignees importing 1-3 containers/month.
+2. **Mawani / Saudi ZATCA Port Clearance Manifests (SADMM)**: King Abdulaziz Port Dammam & Jeddah Islamic Port grain consignees.
+3. **Kenya Ports Authority (KPA - KEMBA)**: Port of Mombasa (Kilindini Harbour) inward agricultural cargo consignees.
+4. **Autonomous Port of Lomé (PAL - TGTGO)**: Togo & West African regional transit consignees.
+5. **Khalifa Bin Salman Port (BHKBS)**: Bahrain registered food & grain importers.
+6. **Syama Prasad Mookerjee Port, Kolkata (SMPK - INCCU)**: Primary export gateway for West Bengal rice mills.
+
 
 

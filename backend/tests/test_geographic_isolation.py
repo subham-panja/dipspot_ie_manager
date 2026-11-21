@@ -7,11 +7,20 @@ from app.factory import create_app
 from app.db import get_db
 
 
-def test_togo_importers_strict_isolation():
-    """Verify 100% strict isolation for Togo: zero Indian or UAE cross-contamination."""
+# ---------------------------------------------------------------------------
+# Shared forbidden-token lists per country for geographic cross-contamination
+# ---------------------------------------------------------------------------
+FORBIDDEN_TOKENS_TOGO = [
+    "india", "bengal", "hooghly", "arambagh", "burdwan", "punjab", "delhi", "dubai", "uae",
+]
+
+
+def test_country_importer_isolation():
+    """Verify 100% strict isolation for country importers: zero cross-contamination."""
+    country = "Togo"
     leads = get_verified_trade_leads(
         lead_type="importer",
-        country="Togo",
+        country=country,
         commodity="Non basmati rice ir64",
         count=100,
     )
@@ -20,7 +29,7 @@ def test_togo_importers_strict_isolation():
     togo_cities = ["Lome", "Kara", "Atakpame", "Sokode", "Kpalime"]
     for l in leads:
         # Strict country
-        assert l["country"] == "Togo"
+        assert l["country"] == country
         # Strict lead type
         assert l["lead_type"] == "importer"
         # Strict phone code (+228)
@@ -33,34 +42,36 @@ def test_togo_importers_strict_isolation():
         assert "Togo" in l["address"]
         # Zero foreign leaks
         addr_low = l["address"].lower()
-        for forbidden in ["india", "bengal", "hooghly", "arambagh", "burdwan", "punjab", "delhi", "dubai", "uae"]:
-            assert forbidden not in addr_low, f"Forbidden '{forbidden}' leaked into Togo address: {l['address']}"
+        for forbidden in FORBIDDEN_TOKENS_TOGO:
+            assert forbidden not in addr_low, f"Forbidden '{forbidden}' leaked into {country} address: {l['address']}"
 
 
-def test_togo_suppliers_strict_isolation():
-    """Verify Togo suppliers are agricultural millers and processing complexes in Togo."""
+def test_country_supplier_isolation():
+    """Verify country suppliers are agricultural millers and processing complexes in the target country."""
+    country = "Togo"
     leads = get_verified_trade_leads(
         lead_type="supplier",
-        country="Togo",
+        country=country,
         commodity="Non basmati rice ir64",
         count=50,
     )
     assert len(leads) == 50
     for l in leads:
-        assert l["country"] == "Togo"
+        assert l["country"] == country
         assert l["lead_type"] == "wb_mill"
         assert l["phones"].startswith("+228")
         assert "Togo" in l["address"]
-        for forbidden in ["india", "bengal", "hooghly", "arambagh", "burdwan", "punjab", "delhi", "dubai", "uae"]:
+        for forbidden in FORBIDDEN_TOKENS_TOGO:
             assert forbidden not in l["address"].lower()
 
 
-def test_map_extractor_togo_isolation():
-    """Verify search_google_maps_places never outputs Indian or Dubai addresses for Togo."""
-    places = search_google_maps_places("rice wholesale Togo", country="Togo", limit=30, lead_type="importer")
+def test_map_extractor_country_isolation():
+    """Verify search_google_maps_places never outputs foreign addresses for the target country."""
+    country = "Togo"
+    places = search_google_maps_places("rice wholesale Togo", country=country, limit=30, lead_type="importer")
     assert len(places) > 0
     for p in places:
-        assert p["country"] == "Togo"
+        assert p["country"] == country
         assert p["phones"].startswith("+228")
         assert "Togo" in p["formatted_address"]
         addr_low = p["formatted_address"].lower()
@@ -68,9 +79,10 @@ def test_map_extractor_togo_isolation():
             assert forbidden not in addr_low
 
 
-def test_sanitize_lead_geography_togo():
+def test_sanitize_geography_cross_contamination():
     """Verify sanitize_lead_geography purges foreign contamination if any source leaks it."""
-    c_profile = resolve_country_profile("Togo")
+    country = "Togo"
+    c_profile = resolve_country_profile(country)
     leaked_lead = {
         "company_name": "Annapurna Rice Mill (Hooghly Cluster)",
         "country": "Togo",
@@ -80,9 +92,9 @@ def test_sanitize_lead_geography_togo():
         "nearest_port": "Haldia Port Terminal",
         "lead_type": "importer",
     }
-    sanitized = sanitize_lead_geography(leaked_lead, "Togo", c_profile)
+    sanitized = sanitize_lead_geography(leaked_lead, country, c_profile)
 
-    assert sanitized["country"] == "Togo"
+    assert sanitized["country"] == country
     assert sanitized["city_or_hub"] in c_profile["cities"]
     assert "India" not in sanitized["address"]
     assert "Hooghly" not in sanitized["address"]
@@ -93,8 +105,9 @@ def test_sanitize_lead_geography_togo():
     assert "Lome" in sanitized["nearest_port"]
 
 
-def test_end_to_end_togo_crawler_job():
-    """Simulate complete crawler execution for Togo and verify MongoDB records."""
+def test_end_to_end_country_crawler():
+    """Simulate complete crawler execution for a target country and verify database records."""
+    country = "Togo"
     app = create_app("testing")
     with app.app_context():
         db = get_db()
@@ -105,7 +118,7 @@ def test_end_to_end_togo_crawler_job():
         run_importer_scrape_thread(
             app=app,
             job_id=test_job_id,
-            country="Togo",
+            country=country,
             commodity="Non basmati rice ir64",
             depth=25,
             custom_label="Togo IR-64 Buyers Verification Run",
@@ -119,14 +132,13 @@ def test_end_to_end_togo_crawler_job():
         assert len(leads) >= 10
 
         for l in leads:
-            assert l["country"] == "Togo", f"Found country {l['country']} in Togo crawl"
-            assert not l["phones"].startswith("+91"), f"Found Indian phone {l['phones']} in Togo crawl"
-            assert l["phones"] == "" or l["phones"].startswith("+228"), f"Found non-Togo phone {l['phones']}"
-            assert "india" not in l["address"].lower(), f"India leaked into Togo lead: {l['address']}"
-            assert "bengal" not in l["address"].lower(), f"Bengal leaked into Togo lead: {l['address']}"
-            assert "hooghly" not in l["address"].lower(), f"Hooghly leaked into Togo lead: {l['address']}"
-            assert "arambagh" not in l["address"].lower(), f"Arambagh leaked into Togo lead: {l['address']}"
+            assert l["country"] == country, f"Found country {l['country']} in {country} crawl"
+            assert not l["phones"].startswith("+91"), f"Found Indian phone {l['phones']} in {country} crawl"
+            assert l["phones"] == "" or l["phones"].startswith("+228"), f"Found non-{country} phone {l['phones']}"
+            assert "india" not in l["address"].lower(), f"India leaked into {country} lead: {l['address']}"
+            assert "bengal" not in l["address"].lower(), f"Bengal leaked into {country} lead: {l['address']}"
+            assert "hooghly" not in l["address"].lower(), f"Hooghly leaked into {country} lead: {l['address']}"
+            assert "arambagh" not in l["address"].lower(), f"Arambagh leaked into {country} lead: {l['address']}"
             assert "arambagh" not in l["city_or_hub"].lower(), f"Arambagh in city_or_hub: {l['city_or_hub']}"
-            assert "annapurna" not in l["company_name"].lower(), f"Annapurna leaked into Togo: {l['company_name']}"
+            assert "annapurna" not in l["company_name"].lower(), f"Annapurna leaked into {country}: {l['company_name']}"
             assert l["lead_type"] == "importer"
-

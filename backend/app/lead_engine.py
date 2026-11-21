@@ -38,7 +38,26 @@ COUNTRY_TO_ISO2: Dict[str, str] = {
     "oman": "OM", "muscat": "OM",
     "kuwait": "KW",
     "bahrain": "BH", "manama": "BH",
-    "india": "IN", "west bengal": "IN",
+    "india": "IN", "west bengal": "IN", "kolkata": "IN",
+    "togo": "TG", "lome": "TG",
+    "benin": "BJ", "cotonou": "BJ",
+    "kenya": "KE", "mombasa": "KE", "nairobi": "KE",
+    "nigeria": "NG", "lagos": "NG", "kano": "NG",
+    "ghana": "GH", "accra": "GH", "tema": "GH",
+    "senegal": "SN", "dakar": "SN",
+    "ivory coast": "CI", "côte d'ivoire": "CI", "abidjan": "CI",
+    "egypt": "EG", "cairo": "EG", "alexandria": "EG",
+    "south africa": "ZA", "johannesburg": "ZA", "durban": "ZA",
+    "vietnam": "VN", "ho chi minh": "VN", "hanoi": "VN",
+    "thailand": "TH", "bangkok": "TH",
+    "singapore": "SG",
+    "malaysia": "MY", "kuala lumpur": "MY",
+    "indonesia": "ID", "jakarta": "ID",
+    "philippines": "PH", "manila": "PH",
+    "bangladesh": "BD", "dhaka": "BD", "chittagong": "BD",
+    "united states": "US", "usa": "US", "us": "US",
+    "united kingdom": "GB", "uk": "GB", "london": "GB",
+    "germany": "DE", "netherlands": "NL", "spain": "ES", "italy": "IT", "france": "FR",
 }
 
 SHARED_PLATFORM_AND_DIRECTORY_DOMAINS = {
@@ -81,12 +100,21 @@ def normalize_phones(raw_text: str, region_hint: str = "IN") -> List[str]:
     if not raw_text:
         return []
 
+    # Strip 4-digit year ranges like 1998-2024, 2020-2024, 2023-2025 so they are never parsed as phones
+    text_clean = re.sub(r"\b(?:19\d{2}|20\d{2})\s*[-–—/]\s*(?:19\d{2}|20\d{2})\b", " ", raw_text)
+    # Strip standalone 4-digit years following establishment/copyright terms
+    text_clean = re.sub(r"\b(?:since|est\.?|established|founded|in|copyright|©|\(c\))\s*(?:19\d{2}|20\d{2})\b", " ", text_clean, flags=re.I)
+
     iso_region = COUNTRY_TO_ISO2.get(region_hint.lower().strip(), region_hint.upper()[:2])
     if len(iso_region) != 2:
         iso_region = "IN"
 
     results = []
-    for match in PHONE_CANDIDATE_REGEX.findall(raw_text):
+    for match in PHONE_CANDIDATE_REGEX.findall(text_clean):
+        # Ignore if match contains consecutive 4-digit year pattern
+        if re.search(r"\b(?:19\d{2}|20\d{2})\b", match):
+            continue
+
         cleaned = re.sub(r"[^\d\+]", "", match)
         if cleaned.startswith("00"):
             cleaned = "+" + cleaned[2:]
@@ -191,7 +219,7 @@ def clean_company_name(raw_name: str) -> str:
     GENERIC_CATEGORY_DISCARDS = [
         r"\b(?:top|best|leading|list\s+of|find)\s+\d*\s*(?:rice|exporters|suppliers|manufacturers|millers)",
         r"\b(?:rice\s+exporters|rice\s+suppliers|rice\s+manufacturers|rice\s+millers)\s+(?:in|from)\s+[a-z]+",
-        r"\b(?:basmati|non\s+basmati)\s+rice\s+(?:exporters|suppliers|manufacturers)",
+        r"\b(?:basmati|non\s+basmati)\s+rice\s+(?:exporters|suppliers|manufacturers|wholesalers)",
         r"\b(?:buy|order)\s+rice\s+online",
         r"\bwholesale\s+(?:\w+\s+)?(?:market|distributors|suppliers)\s+(?:in|from)\s+[a-z]+",
         r"\b(?:retailers|dealers)\s+(?:in|from)\s+[a-z]+",
@@ -202,10 +230,15 @@ def clean_company_name(raw_name: str) -> str:
         r"^\d+\s*(?:kg|mt|gm)",
         r"^(?:plastic|jute|gunny)\s+bags?$",
         r"^(?:white|yellow|non-parboiled|parboiled)(?:,\s*packaging|\s*rice)?$",
+        r"\b(?:machinery|mill\s+machinery|spare\s+parts)\b",
+        r"\b(?:best\s+quality|cheap\s+price|at\s+cheap\s+price)\b",
+        r"^(?:welcome\s+to\s+our|our\s+website|our\s+site|website)$",
     ]
+    has_corp_suffix = bool(re.search(r"\b(?:pvt|ltd|limited|llc|sarl|gmbh|inc|corp|corporation|co|fze|fzco|wll|sa)\b", low_full))
     for pat in GENERIC_CATEGORY_DISCARDS:
         if re.search(pat, low_full) and not any(sep in name for sep in ("|", " - ", " – ", " — ", "•", "·", "::")):
-            return ""
+            if not has_corp_suffix:
+                return ""
 
     # Strip parenthetical annotations like (Hooghly Cluster), (Foodstuff Wholesale), etc., unless legal form like (Pvt Ltd)
     def clean_paren(match):
@@ -221,32 +254,34 @@ def clean_company_name(raw_name: str) -> str:
     if not chunks:
         return ""
 
-    if len(chunks) == 1:
-        single = chunks[0]
-        single = re.sub(r"\.(?:com|org|net|ae|in|co|gov|edu)$", "", single, flags=re.I).strip()
-        single = re.sub(r"\s+[-–—]\s+[A-Za-z\s]+$", "", single).strip()
-        for pat in GENERIC_CATEGORY_DISCARDS:
-            if re.search(pat, single.lower()):
-                return ""
-        return single
-
     def score_chunk(chunk: str) -> float:
         c_low = chunk.lower()
         words = chunk.split()
         
-        # Immediate disqualifiers:
+        # Immediate disqualifiers for page titles, navigation, slogans, and non-entity strings:
         if any(re.search(pat, c_low) for pat in [
-            r"^(?:home|official\s*site|official\s*website|contact\s*us|contact|about\s*us|about|overview|index|main\s*page|products|services|catalog|blog|news|portal|welcome)$",
+            r"^(?:home|homepage|home\s*page|index|index\s+of(?:\s*/)?.*|main\s*page|landing\s*page|welcome|welcome\s+to\s+our\s+(?:site|website)|default\s+page|untitled|untitled\s+document|new\s+page)$",
+            r"^(?:our\s+website|our\s+site|website|the\s+official\s+site)$",
+            r"\b(?:machinery|mill\s+machinery|spare\s+parts)\b",
+            r"\b(?:best\s+quality|cheap\s+price|at\s+cheap\s+price)\b",
+            r"^(?:contact|contact\s*us|about|about\s*us|privacy\s*policy|terms|terms\s*(?:and|&)\s*conditions|products|services|catalog|blog|news|portal|dashboard|cart|checkout)$",
+            r"^(?:404\s*not\s*found|page\s*not\s*found|error|502\s*bad\s*gateway|apache\d*\s*ubuntu\s*default\s*page|default\s*(?:web\s*)?site\s*page)$",
             r"^(?:suppliers|dealers|manufacturers|exporters|wholesalers)(\s+(?:and|&)\s+(?:dealers|suppliers|manufacturers|exporters|wholesalers))?$",
             r"\b(?:buy\s+online|order\s+now|best\s+price|cheap\s+prices|free\s+shipping|free\s+delivery|order\s+fresh|order\s+groceries|grocery\s+shopping|online\s+shopping|same\s+day\s+delivery)\b",
-            r"\b(?:exporters\s+(?:in|from)|suppliers\s+(?:in|from)|manufacturers\s+(?:in|from)|dealers\s+(?:in|from)|wholesalers\s+(?:in|from)|leading\s+exporter|top\s+exporter|leading\s+rice)\b",
-            r"\b(?:rice\s+exporters|rice\s+suppliers|rice\s+manufacturers|rice\s+millers|basmati\s+rice|non\s+basmati\s+rice)\b",
-            r"\b(?:buy\s+rice|order\s+rice|wholesale\s+prices|wholesale\s+(?:\w+\s+)?market|rice\s+brands|indian\s+rice\s+brands|best\s+rice\s+brands|mandi\s+rates?)\b",
             r"\b(?:how\s+to|what\s+is|why\s+|where\s+to|recipes?|calories|definition|meaning\s+of)\b",
             r"\b(?:login|sign\s*in|register|search\s+results|all\s+rights\s+reserved)\b",
             r"\b(?:online\s+supermarket\s+in|supermarket\s+in|grocery\s+in|online\s+grocery)\b",
         ]):
             return -100.0
+
+        # Disqualify standalone trade category / SEO slogans if chunk lacks corporate suffix
+        if not re.search(r"\b(?:pvt|ltd|limited|llc|sarl|gmbh|inc|corp|corporation|co|fze|fzco|wll|sa)\b", c_low):
+            if any(re.search(pat, c_low) for pat in [
+                r"\b(?:exporters\s+(?:in|from)|suppliers\s+(?:in|from)|manufacturers\s+(?:in|from)|dealers\s+(?:in|from)|wholesalers\s+(?:in|from)|leading\s+exporter|top\s+exporter|leading\s+rice)\b",
+                r"\b(?:rice\s+exporters|rice\s+suppliers|rice\s+manufacturers|rice\s+millers|basmati\s+rice|non\s+basmati\s+rice)\b",
+                r"\b(?:buy\s+rice|order\s+rice|wholesale\s+prices|wholesale\s+(?:\w+\s+)?market|rice\s+brands|indian\s+rice\s+brands|best\s+rice\s+brands|mandi\s+rates?)\b",
+            ]):
+                return -100.0
 
         score = 15.0
         # Positive signals: Corporate suffixes
@@ -285,6 +320,23 @@ def clean_company_name(raw_name: str) -> str:
 
         return score
 
+    if len(chunks) == 1:
+        single = chunks[0]
+        if any(re.search(pat, single.lower()) for pat in [
+            r"^(?:welcome\s+to\s+our\s+(?:site|website)|welcome\s+to\s+the\s+official\s+site)$",
+            r"^(?:our\s+website|our\s+site|website|homepage|home\s*page|index|index\s*of.*|welcome|default\s*(?:web\s*)?site\s*page)$",
+        ]):
+            return ""
+        single = re.sub(r"^(?:Welcome\s+to|Official\s+Site\s+of|Home\s+of)\s+", "", single, flags=re.I).strip()
+        single = re.sub(r"\.(?:com|org|net|ae|in|co|gov|edu)$", "", single, flags=re.I).strip()
+        single = re.sub(r"\s+[-–—]\s+[A-Za-z\s]+$", "", single).strip()
+        for pat in GENERIC_CATEGORY_DISCARDS:
+            if re.search(pat, single.lower()) and not has_corp_suffix:
+                return ""
+        if score_chunk(single) <= 15.0:
+            return ""
+        return single
+
     scored_chunks = [(c, score_chunk(c)) for c in chunks]
     valid_chunks = [sc for sc in scored_chunks if sc[1] > -30.0]
     if not valid_chunks:
@@ -292,7 +344,7 @@ def clean_company_name(raw_name: str) -> str:
 
     valid_chunks.sort(key=lambda x: x[1], reverse=True)
     best_chunk = valid_chunks[0][0]
-    best_chunk = re.sub(r"^(?:Welcome\s+to|Official\s+Site\s+of)\s+", "", best_chunk, flags=re.I).strip()
+    best_chunk = re.sub(r"^(?:Welcome\s+to|Official\s+Site\s+of|Home\s+of)\s+", "", best_chunk, flags=re.I).strip()
     best_chunk = re.sub(r"\.(?:com|org|net|ae|in|co|gov|edu)$", "", best_chunk, flags=re.I).strip()
     best_chunk = re.sub(r"\s+[-–—]\s+(?:UAE|Dubai|India|Togo|USA|UK|Kolkata)$", "", best_chunk, flags=re.I).strip()
     return best_chunk.strip()

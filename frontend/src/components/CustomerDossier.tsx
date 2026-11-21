@@ -278,7 +278,7 @@ export default function CustomerDossier({
                 <Edit2 className="w-4 h-4 text-purple-400" />
                 <span>Edit Lead Specifications & Metadata</span>
               </h3>
-              <span className="text-xs text-slate-400">All fields directly update MongoDB</span>
+              <span className="text-xs text-slate-400">All fields update in real-time</span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">

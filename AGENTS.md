@@ -7,7 +7,7 @@
 ## 1. Quick Identity & Mission
 You are working on **TradePulse EXIM (`dipspot_ie_manager`)**, a high-performance export-import commercial operating system and verified commodity lead generation crawler.
 
-- **Stack**: Next.js 14 (TypeScript/Tailwind) + Flask 3.1 REST API (Python 3.12) + MongoDB (`trade_suite`) + SQLite (`rice_leads.db`).
+- **Stack**: Next.js 14 (TypeScript/Tailwind) + Flask 3.1 REST API (Python 3.12) + Document Store + Relational DB.
 - **Core Endpoints**: Backend runs on `http://localhost:5001/api/...`, Frontend runs on `http://localhost:3000`.
 
 ---
@@ -31,7 +31,7 @@ You are working on **TradePulse EXIM (`dipspot_ie_manager`)**, a high-performanc
 5. **Always Verify with Tests**:
    - After modifying crawler, engine, or catalog code, run:
      ```bash
-     PYTHONPATH=backend python3 -m pytest backend/tests/test_togo_strictness.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py -q
+     PYTHONPATH=backend python3 -m pytest backend/tests/test_government_and_port_sources.py backend/tests/test_lead_name_and_role_accuracy.py backend/tests/test_geographic_isolation.py backend/tests/test_crawler_real_deep.py backend/tests/test_full_goal_suite.py backend/tests/test_lead_engine.py backend/tests/test_customs_manifest_strategy.py -q
      ```
    - After frontend modifications, verify build:
      ```bash
@@ -50,7 +50,7 @@ You are working on **TradePulse EXIM (`dipspot_ie_manager`)**, a high-performanc
 | **Geospatial & Google Maps POI extraction** | `backend/app/map_extractor.py` |
 | **Country profiles (cities, phone codes, ports) & background workers** | `backend/app/tasks.py` |
 | **REST API routes (/api/leads, /api/scrape, exports)** | `backend/app/routes/api.py` |
-| **MongoDB & SQLite database synchronization** | `backend/app/db.py` |
+| **Database layer & synchronization** | `backend/app/db.py` |
 | **Gmail SMTP 500-email/day rate limit stopper** | `backend/app/smtp_stopper.py` |
 | **Omnichannel CRM (Gmail + WhatsApp Cloud API)** | `backend/app/followup_engine.py` |
 | **Frontend Crawler UI (Stepper, Dorks, Monitor, Exports)** | `frontend/src/app/crawler/page.tsx` |

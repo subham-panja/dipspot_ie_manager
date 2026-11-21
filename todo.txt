@@ -1,0 +1,18 @@
+Role: you are an expert lead gen app developer software engineer. 
+
+work: you need to learn from these tools https://github.com/gosom/google-maps-scraper
+https://github.com/laramies/theHarvester
+https://github.com/scrapy/scrapy
+https://github.com/asiifdev/business-leads-ai-automation
+https://github.com/twentyhq/twenty
+all tools mentione here https://github.com/topics/lead-generation-tool
+
+https://github.com/Tommy-old/b2b-buyer-discovery
+
+
+and then learn deeply how those works. and thne implement in our software focus more on UI/UX and features like filtering, sorting, exporting, and saving leads to a database.
+
+social platform like https://apify.com/twitter-scraper
+
+make sure our scrapping enigne work best of the best its a all in one lead generation tool it should work anyhow. 
+

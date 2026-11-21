@@ -347,13 +347,13 @@ export default function CampaignTemplatesStudioPage() {
       };
 
       if (activeTemplate?._id) {
-        // Update existing in MongoDB
+        // Update existing record
         await fetchJson(`/campaigns/templates/${activeTemplate.template_id}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
       } else {
-        // Create new in MongoDB
+        // Create new record
         const created = await fetchJson<{ template: MessageTemplate }>('/campaigns/templates', {
           method: 'POST',
           body: JSON.stringify({

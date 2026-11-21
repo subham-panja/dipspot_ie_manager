@@ -183,6 +183,7 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "lead_type": lead_type,
         "gstin": doc.get("gstin") or "",
         "pan": doc.get("pan") or "",
+        "iec_code": doc.get("iec_code") or doc.get("registration_number") or "",
         "fssai_or_sfda_status": doc.get("fssai_or_sfda_status") or "",
         "state": doc.get("state") or "",
         "district": district,
