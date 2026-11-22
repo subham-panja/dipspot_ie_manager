@@ -1418,6 +1418,7 @@ class RealisticWebScraper:
         tier: str = "sme",
         target_port: Optional[str] = None,
         target_country: Optional[str] = None,
+        existing_keys: Optional[set] = None,
     ) -> List[Dict[str, any]]:
         """
         Reverse-Engineers Customs Manifest data & Bill of Lading (B/L) consignee records for HS 100630.
@@ -1557,6 +1558,7 @@ class RealisticWebScraper:
                 count=needed,
                 tier="sme",
                 port=target_port,
+                existing_keys=existing_keys,
             )
             for cl in cat_leads:
                 # Ensure it's not a conglomerate
@@ -2260,6 +2262,7 @@ def execute_realistic_harvest(
             commodity=target_commodity,
             count=needed,
             tier="sme",
+            existing_keys=seen_harvested_keys,
         )
         for cl in cat_leads:
             c_name_val = cl.get("company_name", "")

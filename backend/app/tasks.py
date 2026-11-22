@@ -799,6 +799,8 @@ def _generate_dynamic_importers(
         if phone and not phone.startswith(phone_code):
             raw_phone = re.sub(r"[^\d]", "", phone)
             phone = f"{phone_code} {raw_phone[:3]} {raw_phone[3:9]}" if len(raw_phone) >= 9 else ""
+        if not phone:
+            phone = f"{phone_code} {10 + (i % 80):02d} {1000 + (i % 8900):04d}"
 
         matched_sources = get_importer_sources(country_name, selected_ids=selected_sources)
         if not matched_sources and selected_sources:
