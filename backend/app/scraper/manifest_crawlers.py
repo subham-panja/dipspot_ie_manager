@@ -177,7 +177,22 @@ class ManifestCrawlersMixin:
                 f"May we send our current CIF quote and lab inspection specifications?"
             )
             wa_url = f"https://wa.me/{clean_digits}?text={wa_text}" if clean_digits else ""
-            li_url = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(c_name_val + ' Purchase Manager')}"
+            
+            # Primary: RecruitIn X-ray discovery for decision-maker persona; Fallback: 1-click search URL
+            persona_url = ""
+            if hasattr(self, "search_xray_profiles"):
+                try:
+                    xray_profs = self.search_xray_profiles(c_name_val, country=target_c, platform="linkedin", max_results=1)
+                    if xray_profs:
+                        persona_url = xray_profs[0]["profile_url"]
+                        contact = f"{xray_profs[0]['name']} ({xray_profs[0]['title']})" if xray_profs[0].get("title") else xray_profs[0]["name"]
+                except Exception:
+                    pass
+
+            fallback_li = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(c_name_val + ' Purchase Manager')}"
+            final_li = persona_url or fallback_li
+            email_parts = [e.strip() for e in valid_emails.split(";") if e.strip()] if valid_emails else []
+            phone_parts = [p.strip() for p in phones_str.split(";") if p.strip()] if phones_str else []
 
             leads.append({
                 "company_name": c_name_val,
@@ -188,6 +203,14 @@ class ManifestCrawlersMixin:
                 "contact_person": contact,
                 "phones": phones_str,
                 "emails": valid_emails,
+                "primary_email": email_parts[0] if email_parts else "",
+                "secondary_email": email_parts[1] if len(email_parts) > 1 else "",
+                "direct_phone": phone_parts[0] if phone_parts else "",
+                "whatsapp_url": wa_url,
+                "whatsapp_outreach_url": wa_url,
+                "linkedin_persona_url": final_li,
+                "linkedin_search_url": final_li,
+                "corporate_contact_page_url": f"{cand['url'].rstrip('/')}/contact" if cand.get("url") else "",
                 "website": f"https://www.{cand['domain']}" if is_domain_live(cand['domain']) else "",
                 "address": c_info["address"] or f"{cand.get('snippet', '')[:120]}, {target_c}",
                 "matched_varieties": f"{commodity} (HS 100630)",
@@ -201,8 +224,6 @@ class ManifestCrawlersMixin:
                 "shipment_volume": "1-3 Containers / mo (25-75 MT)",
                 "importer_tier": "sme_importer",
                 "customs_manifest_data": f"Customs B/L Manifest (HS 100630) | Port: {target_port} | Regular 1-3 FCL Consignee",
-                "whatsapp_outreach_url": wa_url,
-                "linkedin_search_url": li_url,
                 "twitter_url": c_info.get("twitter_url", ""),
                 "facebook_url": c_info.get("facebook_url", ""),
                 "instagram_url": c_info.get("instagram_url", ""),
@@ -246,8 +267,20 @@ class ManifestCrawlersMixin:
                     f"We are an APEDA-registered rice mill in West Bengal exporting Non-Basmati Parboiled IR-64 & 1121 Basmati. "
                     f"May we send our current CIF quote and lab inspection specifications?"
                 )
-                cl["whatsapp_outreach_url"] = f"https://wa.me/{clean_d}?text={wa_msg}" if clean_d else ""
-                cl["linkedin_search_url"] = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(cl['company_name'] + ' Purchase Manager')}"
+                wa_link = f"https://wa.me/{clean_d}?text={wa_msg}" if clean_d else ""
+                fallback_li = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(cl['company_name'] + ' Purchase Manager')}"
+                cl["whatsapp_outreach_url"] = wa_link
+                cl["whatsapp_url"] = wa_link
+                cl["linkedin_search_url"] = fallback_li
+                cl["linkedin_persona_url"] = cl.get("linkedin_persona_url") or fallback_li
+                raw_e = cl.get("emails", "")
+                raw_p = cl.get("phones", "")
+                e_list = [e.strip() for e in raw_e.split(";") if e.strip()] if raw_e else []
+                p_list = [p.strip() for p in raw_p.split(";") if p.strip()] if raw_p else []
+                cl["primary_email"] = cl.get("primary_email") or (e_list[0] if e_list else "")
+                cl["secondary_email"] = cl.get("secondary_email") or (e_list[1] if len(e_list) > 1 else "")
+                cl["direct_phone"] = cl.get("direct_phone") or (p_list[0] if p_list else "")
+                cl["corporate_contact_page_url"] = cl.get("corporate_contact_page_url") or (f"{cl['website'].rstrip('/')}/contact" if cl.get("website") else "")
 
                 leads.append(cl)
                 if len(leads) >= depth:

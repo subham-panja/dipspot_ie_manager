@@ -17,6 +17,7 @@ from app.routes.api_leads import register_lead_routes
 from app.routes.api_export_stats import register_export_stats_routes
 from app.routes.api_bulk import register_bulk_routes
 from app.routes.api_crawler import register_crawler_routes
+from app.routes.api_xray import register_xray_routes
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -24,6 +25,7 @@ register_lead_routes(api_bp)
 register_export_stats_routes(api_bp)
 register_bulk_routes(api_bp)
 register_crawler_routes(api_bp)
+register_xray_routes(api_bp)
 
 __all__ = [
     "api_bp",

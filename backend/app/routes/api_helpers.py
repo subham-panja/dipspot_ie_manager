@@ -12,6 +12,12 @@ CSV_EXPORT_FIELDS = [
     "country",
     "city_or_hub",
     "contact_person",
+    "primary_email",
+    "secondary_email",
+    "direct_phone",
+    "whatsapp_url",
+    "linkedin_persona_url",
+    "corporate_contact_page_url",
     "phones",
     "emails",
     "website",
@@ -139,9 +145,21 @@ def serialize_mongo_lead(doc: dict) -> dict:
         f"Customs B/L Manifest (HS 100630) | Port: {n_port} | 1-3 FCL/mo" if is_imp else ""
     )
 
+    # Multi-channel communication resolution
+    raw_emails_str = doc.get("emails") or ""
+    email_items = [e.strip() for e in re.split(r"[;,]", raw_emails_str) if e.strip() and "@" in e]
+    primary_email = doc.get("primary_email") or (email_items[0] if email_items else "")
+    secondary_email = doc.get("secondary_email") or (email_items[1] if len(email_items) > 1 else "")
+
+    phone_items = [p.strip() for p in re.split(r"[;,]", phones) if p.strip()]
+    direct_phone = doc.get("direct_phone") or (phone_items[0] if phone_items else "")
+
+    website_url = doc.get("website") or ""
+    corporate_contact_page_url = doc.get("corporate_contact_page_url") or (f"{website_url.rstrip('/')}/contact" if website_url else "")
+
     # Generate 1-click WhatsApp Outreach Link with personalized CIF export message
-    whatsapp_url = doc.get("whatsapp_outreach_url") or ""
-    clean_digits = re.sub(r"[^\d]", "", phones.split(";")[0]) if phones else ""
+    whatsapp_url = doc.get("whatsapp_url") or doc.get("whatsapp_outreach_url") or ""
+    clean_digits = re.sub(r"[^\d]", "", direct_phone or (phones.split(";")[0] if phones else ""))
     if not whatsapp_url and clean_digits and is_imp:
         contact_label = contact_person.split("(")[0].strip() or "Purchase Manager"
         com_name = company_name.split("(")[0].strip() or "your company"
@@ -154,11 +172,12 @@ def serialize_mongo_lead(doc: dict) -> dict:
         )
         whatsapp_url = f"https://wa.me/{clean_digits}?text={wa_text}"
 
-    # Generate 1-click LinkedIn Search Link targeting Purchase Manager / Owner
-    linkedin_url = doc.get("linkedin_search_url") or ""
+    # Generate 1-click LinkedIn Search / Persona Link
+    linkedin_url = doc.get("linkedin_persona_url") or doc.get("linkedin_search_url") or ""
     if not linkedin_url and company_name:
         clean_co = re.sub(r"\b(?:LLC|W\.L\.L\.|Ltd|SARL|Est\.|Inc\.|FZE|Pte)\b", "", company_name, flags=re.IGNORECASE).strip()
         linkedin_url = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(clean_co + ' Purchase Manager')}"
+    linkedin_persona_url = doc.get("linkedin_persona_url") or linkedin_url
 
     # Generate Google Maps Search Link for verification
     gmaps_url = doc.get("google_maps_url") or ""
@@ -172,6 +191,12 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "country": country,
         "city_or_hub": city_or_hub,
         "contact_person": contact_person,
+        "primary_email": primary_email,
+        "secondary_email": secondary_email,
+        "direct_phone": direct_phone,
+        "whatsapp_url": whatsapp_url,
+        "linkedin_persona_url": linkedin_persona_url,
+        "corporate_contact_page_url": corporate_contact_page_url,
         "phones": phones,
         "emails": doc.get("emails") or "",
         "website": doc.get("website") or "",

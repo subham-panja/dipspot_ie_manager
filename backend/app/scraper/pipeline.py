@@ -265,6 +265,18 @@ def execute_realistic_harvest(
             if len(harvested_leads) >= depth:
                 break
 
+    # Stage 3.5: Multi-Channel Lead Enrichment via RecruitIn X-Ray
+    scraper.update_job_progress(90, f"Enriching {len(harvested_leads)} leads with RecruitIn X-ray & multi-channel contacts...", status="running")
+    enriched_harvested_leads = []
+    for ld in harvested_leads:
+        try:
+            enriched_ld = scraper.enrich_lead_multichannel(ld, target_country=c_name)
+            enriched_harvested_leads.append(enriched_ld)
+        except Exception as exc:
+            scraper.log("WARN", f"Multi-channel enrichment error for '{ld.get('company_name')}': {exc}")
+            enriched_harvested_leads.append(ld)
+    harvested_leads = enriched_harvested_leads
+
     # Stage 4: Deduplication and persistence
     scraper.update_job_progress(95, "Deduplicating records and committing to database...", status="running")
     scraper.log("DEDUP", f"Cross-referencing {len(harvested_leads)} harvested records against database")

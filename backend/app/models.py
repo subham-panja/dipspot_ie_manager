@@ -1,3 +1,5 @@
+import re
+import urllib.parse
 from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 
@@ -99,8 +101,9 @@ class Lead(db.Model):
         # Build trade intelligence dossier
         is_imp = self.lead_type == "importer"
         trade_role = "Direct Bulk & Retail Commodity Importer" if is_imp else "Primary Certified Processing Mill & Exporter"
-        vol_est = f"{(self.priority_score * 180):,} MT / Year" if self.priority_score > 0 else "5,000 MT / Year"
-        risk_tier = "Tier 1 Verified (Grade A+)" if self.priority_score >= 80 else "Commercial Active Trader"
+        score = self.priority_score or 0
+        vol_est = f"{(score * 180):,} MT / Year" if score > 0 else "5,000 MT / Year"
+        risk_tier = "Tier 1 Verified (Grade A+)" if score >= 80 else "Commercial Active Trader"
         lanes = [
             f"Kolkata Port (INCCU) &rarr; {port}",
             f"Haldia Port (INHAL) &rarr; {port}",
@@ -110,12 +113,42 @@ class Lead(db.Model):
         if not varieties:
             varieties = ["Non-Basmati Grains", "Parboiled Cargo", "Agricultural Merchandise"]
 
+        raw_emails_list = [e.strip() for e in (self.emails or "").split(";") if e.strip() and "@" in e]
+        primary_email = raw_emails_list[0] if raw_emails_list else ""
+        secondary_email = raw_emails_list[1] if len(raw_emails_list) > 1 else ""
+
+        raw_phones_list = [p.strip() for p in (self.phones or "").split(";") if p.strip()]
+        direct_phone = raw_phones_list[0] if raw_phones_list else ""
+
+        clean_digits = re.sub(r"[^\d]", "", direct_phone or (self.phones or ""))
+        wa_url = ""
+        if clean_digits:
+            contact_label = (self.contact_person or "").split("(")[0].strip() or "Purchase Manager"
+            co_label = (self.company_name or "").split("(")[0].strip() or "your company"
+            wa_text = urllib.parse.quote_plus(
+                f"Hello {contact_label}, we noticed {co_label} imports agricultural commodities. "
+                f"We are an APEDA-accredited rice exporter in West Bengal. May we send our product catalogue and CIF pricing?"
+            )
+            wa_url = f"https://wa.me/{clean_digits}?text={wa_text}"
+
+        clean_co = re.sub(r"\b(?:LLC|W\.L\.L\.|Ltd|SARL|Est\.|Inc\.|FZE|Pte)\b", "", self.company_name or "", flags=re.IGNORECASE).strip()
+        li_url = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(clean_co + ' Purchase Manager')}" if clean_co else ""
+        corp_contact_url = f"{self.website.rstrip('/')}/contact" if self.website else ""
+
         return {
             "id": self.id,
             "company_name": self.company_name,
             "country": self.country,
             "city_or_hub": self.city_or_hub,
             "contact_person": self.contact_person,
+            "primary_email": primary_email,
+            "secondary_email": secondary_email,
+            "direct_phone": direct_phone,
+            "whatsapp_url": wa_url,
+            "whatsapp_outreach_url": wa_url,
+            "linkedin_persona_url": li_url,
+            "linkedin_search_url": li_url,
+            "corporate_contact_page_url": corp_contact_url,
             "phones": self.phones,
             "emails": self.emails,
             "website": self.website,
