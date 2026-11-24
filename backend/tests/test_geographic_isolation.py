@@ -80,7 +80,7 @@ def test_map_extractor_country_isolation():
 
 
 def test_sanitize_geography_cross_contamination():
-    """Verify sanitize_lead_geography purges foreign contamination if any source leaks it."""
+    """Verify sanitize_lead_geography rejects foreign contamination and preserves valid country leads."""
     country = "Togo"
     c_profile = resolve_country_profile(country)
     leaked_lead = {
@@ -92,17 +92,26 @@ def test_sanitize_geography_cross_contamination():
         "nearest_port": "Haldia Port Terminal",
         "lead_type": "importer",
     }
+    # Foreign candidate must be discarded (return None) to prevent fabricating fake Togo addresses
     sanitized = sanitize_lead_geography(leaked_lead, country, c_profile)
+    assert sanitized is None, "Foreign contaminated candidate must be discarded (None), never mutated with fake target country address"
 
-    assert sanitized["country"] == country
-    assert sanitized["city_or_hub"] in c_profile["cities"]
-    assert "India" not in sanitized["address"]
-    assert "Hooghly" not in sanitized["address"]
-    assert "Arambagh" not in sanitized["address"]
-    assert "Togo" in sanitized["address"]
-    assert not sanitized["phones"].startswith("+91")
-    assert sanitized["phones"] == "" or sanitized["phones"].startswith("+228")
-    assert "Lome" in sanitized["nearest_port"]
+    # Genuine country lead must be preserved intact
+    valid_lead = {
+        "company_name": "SIAB Togo SARL",
+        "country": "Togo",
+        "city_or_hub": "Lome",
+        "address": "Zone Portuaire, BP 1234, Lome, Togo",
+        "phones": "+228 22 21 00 11",
+        "nearest_port": "Port Autonome de Lome",
+        "lead_type": "importer",
+    }
+    valid_sanitized = sanitize_lead_geography(valid_lead, country, c_profile)
+    assert valid_sanitized is not None
+    assert valid_sanitized["country"] == country
+    assert valid_sanitized["city_or_hub"] in c_profile["cities"]
+    assert "Togo" in valid_sanitized["address"]
+    assert valid_sanitized["phones"].startswith("+228")
 
 
 def test_end_to_end_country_crawler():

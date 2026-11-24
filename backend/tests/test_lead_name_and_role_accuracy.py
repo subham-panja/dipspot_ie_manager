@@ -125,7 +125,7 @@ class TestZeroSyntheticPhonesAndEmails:
             "address": "Lome",
         }
         sanitized_foreign = sanitize_lead_geography(lead_foreign_phone, "Togo", country_profile)
-        assert sanitized_foreign["phones"] == "", "Foreign phone in strict country crawl must be cleared, not transformed into fake +228 22 21...!"
+        assert sanitized_foreign is None or sanitized_foreign["phones"] == "", "Foreign phone in strict country crawl must be rejected or cleared, never transformed into fake +228 22 21...!"
 
     def test_verified_catalog_never_generates_fake_emails_on_cycles(self):
         # Request 40 leads (causing cycle > 0 for Togo)

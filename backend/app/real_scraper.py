@@ -54,11 +54,12 @@ JUNK_DOMAINS = {
     "youtube.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
     "wikipedia.org", "pinterest.com", "linkedin.com", "amazon.com", "ebay.com",
     "reddit.com", "tiktok.com", "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
-    # Gaming & entertainment portals (Solitaire, Sea of Thieves, Steam, Roblox, etc.)
+    # Gaming & entertainment portals (Solitaire, Sea of Thieves, Steam, Roblox, HLTV, etc.)
     "solitaired.com", "solitr.com", "seaofthieves.com", "steampowered.com", "roblox.com",
     "twitch.tv", "ign.com", "gamespot.com", "vgtimes.com", "epicgames.com",
     "minecraft.net", "friv.com", "crazygames.com", "pogo.com", "chess.com",
     "miniclip.com", "gameforge.com", "playstation.com", "xbox.com", "nintendo.com",
+    "hltv.org", "liquipedia.net", "gosugamers.net", "vlr.gg",
     # Dictionaries, encyclopedias & translation portals
     "merriam-webster.com", "cambridge.org", "dictionary.cambridge.org", "dictionary.com",
     "thesaurus.com", "wiktionary.org", "weblio.jp", "lexico.com", "vocabulary.com",
@@ -98,8 +99,8 @@ B2B_DIRECTORY_DOMAINS = {
 
 # Regex patterns matching non-commercial, gaming, dictionary, tutorial, and consumer entities
 JUNK_PATTERNS = [
-    # Gaming & entertainment
-    re.compile(r"\b(solitaire|gameplay|play free|play online|sea of thieves|steampowered|roblox|puzzle|walkthrough|arcade|casino|slots|betting|fortnite|minecraft)\b", re.I),
+    # Gaming & entertainment & esports
+    re.compile(r"\b(solitaire|gameplay|play free|play online|sea of thieves|steampowered|roblox|puzzle|walkthrough|arcade|casino|slots|betting|fortnite|minecraft|hltv|counter-strike|esports|esport|gamer|twitch|liquipedia|dota|league of legends|valorant|overwatch|pubg)\b", re.I),
     # Dictionaries, definitions, translations
     re.compile(r"\b(definition\s*&\s*meaning|dictionary|synonyms|antonyms|meaning in|thesaurus|pronunciation|how to pronounce|translate|translation|grammar)\b", re.I),
     # Tech tutorials & code repos
@@ -1397,6 +1398,12 @@ class RealisticWebScraper:
             target_port = "Syama Prasad Mookerjee Port, Kolkata (INCCU)"
             c_name = "India"
 
+        # Cross-country isolation: do not crawl foreign port manifests if target country is specified
+        if target_c and target_c.lower() not in ("all", "global"):
+            if c_name and c_name.lower() != target_c.lower() and target_c.lower() not in c_name.lower():
+                self.log("SKIP", f"Skipped port manifest '{source_name}' ({c_name}) as it does not match target country '{target_c}'")
+                return []
+
         return self.crawl_customs_manifest_suite(
             commodity=commodity,
             target_c=c_name or target_c,
@@ -1980,36 +1987,73 @@ class RealisticWebScraper:
         return leads
 
 
-def sanitize_lead_geography(lead: Dict[str, any], target_c: str, country_profile: Dict[str, any]) -> Dict[str, any]:
+def sanitize_lead_geography(lead: Dict[str, any], target_c: str, country_profile: Dict[str, any]) -> Optional[Dict[str, any]]:
     """
-    Guarantees strict geographic isolation:
+    Guarantees 100% strict geographic isolation:
     - Never permits a lead to retain an address, city, or phone from a foreign country.
-    - Re-aligns city to the target country cities pool.
-    - Re-aligns address to target country.
-    - Re-aligns telephone number to target country calling code.
-    - Re-aligns nearest port to target country ports.
+    - If a candidate belongs to another country (foreign country, city, address, phone code), DISCARDS it by returning None.
+    - Never fabricates fake target-country addresses on foreign entities.
     """
-    if not target_c or target_c.lower() == "global":
+    if not lead:
+        return None
+
+    if not target_c or target_c.lower() in ("global", "all"):
         return lead
 
     c_name = country_profile["name"]
+    c_name_low = c_name.lower().strip()
     cities_pool = country_profile.get("cities", [c_name])
     phone_code = country_profile.get("phone_code", "+1")
     ports_pool = country_profile.get("nearest_ports", [f"Port of {c_name}"])
 
-    lead["country"] = c_name
-
     foreign_tokens = [
         "arambagh", "hooghly", "burdwan", "kolkata", "delhi", "amritsar", "karnal",
         "haryana", "punjab", "birbhum", "west bengal", "dubai", "jebel ali", "riyadh",
-        "jeddah", "dammam", "houston", "california", "india", "uae", "saudi", "usa"
+        "jeddah", "dammam", "houston", "california", "india", "uae", "saudi", "usa",
+        "kenya", "mombasa", "nairobi", "nigeria", "lagos", "cairo", "egypt", "south africa",
+        "tanzania", "dar es salaam", "djibouti", "benin", "cotonou", "ghana", "accra"
     ]
-    disallowed_tokens = [t for t in foreign_tokens if t not in c_name.lower()]
+    disallowed_tokens = [t for t in foreign_tokens if t not in c_name_low]
 
-    # Validate city
+    # 1. Reject if candidate's explicit country is another country
+    orig_c = (lead.get("country") or "").lower().strip()
+    if orig_c and orig_c not in ("global", "all") and orig_c != c_name_low and c_name_low not in orig_c:
+        return None
+
+    # 2. Reject if candidate's company name contains foreign geographic signals
+    c_company = (lead.get("company_name") or "").lower()
+    if any(tok in c_company for tok in disallowed_tokens):
+        return None
+
+    # 3. Reject if city contains foreign signals
     lead_city = lead.get("city_or_hub", "")
-    city_is_foreign = any(dt in lead_city.lower() for dt in disallowed_tokens)
-    if not lead_city or lead_city == c_name or city_is_foreign or lead_city not in cities_pool:
+    if any(dt in lead_city.lower() for dt in disallowed_tokens):
+        return None
+
+    # 4. Reject if address contains foreign signals
+    addr = lead.get("address", "")
+    if any(dt in addr.lower() for dt in disallowed_tokens):
+        return None
+
+    # 5. Reject if telephone number has a foreign country calling code
+    phone = lead.get("phones", "")
+    if phone:
+        cleaned_phone_code = phone_code.replace("+", "")
+        raw_digits = re.sub(r"[^\d]", "", phone)
+        # Check against common foreign prefixes
+        if cleaned_phone_code != "91" and (raw_digits.startswith("91") and len(raw_digits) >= 12):
+            return None
+        if cleaned_phone_code != "254" and (raw_digits.startswith("254") and len(raw_digits) >= 10):
+            return None
+        if cleaned_phone_code != "971" and (raw_digits.startswith("971") and len(raw_digits) >= 10):
+            return None
+        if cleaned_phone_code != "966" and (raw_digits.startswith("966") and len(raw_digits) >= 10):
+            return None
+
+    lead["country"] = c_name
+
+    # Validate or assign authentic city strictly from country profile
+    if not lead_city or lead_city == c_name or lead_city not in cities_pool:
         h = abs(hash(lead.get("company_name", "")))
         chosen_city = cities_pool[h % len(cities_pool)]
         lead["city_or_hub"] = chosen_city
@@ -2020,14 +2064,11 @@ def sanitize_lead_geography(lead: Dict[str, any], target_c: str, country_profile
         lead["district"] = lead_city
 
     # Validate address
-    addr = lead.get("address", "")
-    addr_is_foreign = any(dt in addr.lower() for dt in disallowed_tokens)
-    if not addr or addr_is_foreign or c_name.lower() not in addr.lower():
-        role = lead.get("category_or_role") or "Commercial Trade Logistics Terminal"
+    if not addr or c_name_low not in addr.lower():
+        role = lead.get("category_or_role") or "Zone Commerciale et Portuaire"
         lead["address"] = f"{role}, {lead['city_or_hub']}, {c_name}"
 
-    # Validate phone (Strict Zero-Mock / Zero-Synthetic Policy: Never fabricate random digits)
-    phone = lead.get("phones", "")
+    # Validate phone (Strict Zero-Mock Policy: Never fabricate random digits)
     if phone:
         cleaned_phone_code = phone_code.replace("+", "")
         raw_digits = re.sub(r"[^\d]", "", phone)
@@ -2043,7 +2084,7 @@ def sanitize_lead_geography(lead: Dict[str, any], target_c: str, country_profile
     # Validate nearest port
     port = lead.get("nearest_port", "")
     port_is_foreign = any(dt in str(port).lower() for dt in disallowed_tokens)
-    if not port or port_is_foreign or c_name.lower() not in str(port).lower():
+    if not port or port_is_foreign or c_name_low not in str(port).lower():
         h = abs(hash(lead.get("company_name", "")))
         lead["nearest_port"] = ports_pool[h % len(ports_pool)]
 
@@ -2162,9 +2203,13 @@ def execute_realistic_harvest(
                 scraper.log("DISCARD", f"Discarded non-trade lead '{c_name_val}': {reason}", url=ld.get("source_url"))
                 continue
 
+            ld = sanitize_lead_geography(ld, c_name, country_profile)
+            if not ld:
+                scraper.log("DISCARD", f"Discarded foreign entity '{c_name_val}' not belonging to '{c_name}'", url=ld.get("source_url") if ld else "")
+                continue
+
             seen_harvested_keys.add(c_key)
             idx_offset = len(harvested_leads)
-            ld = sanitize_lead_geography(ld, c_name, country_profile)
             if not ld.get("latitude"):
                 ld["latitude"] = round(base_lat + ((idx_offset % 10) - 5) * 0.015, 5)
                 ld["longitude"] = round(base_lng + ((idx_offset % 10) - 5) * 0.015, 5)
@@ -2218,13 +2263,7 @@ def execute_realistic_harvest(
             if not is_valid:
                 continue
 
-            seen_harvested_keys.add(c_key)
-            idx_offset = len(harvested_leads)
-            city = cities_pool[idx_offset % len(cities_pool)]
-            port = ports_pool[idx_offset % len(ports_pool)]
-            assigned_source = avail_sources[idx_offset % len(avail_sources)]
-
-            harvested_leads.append({
+            candidate_doc = {
                 "company_name": c_name_val,
                 "country": c_name,
                 "city_or_hub": city,
@@ -2248,7 +2287,14 @@ def execute_realistic_harvest(
                 "gstin": "",
                 "pan": "",
                 "fssai_or_sfda_status": f"{c_name} Registered Trade Operator",
-            })
+            }
+            sanitized_cand = sanitize_lead_geography(candidate_doc, c_name, country_profile)
+            if not sanitized_cand:
+                scraper.log("DISCARD", f"Discarded candidate '{c_name_val}' not belonging to '{c_name}'", url=cand["url"])
+                continue
+
+            seen_harvested_keys.add(c_key)
+            harvested_leads.append(sanitized_cand)
             if len(harvested_leads) >= depth:
                 break
 

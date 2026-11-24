@@ -409,7 +409,7 @@ SUPPLIER_SOURCES: List[Dict] = [
 
 def _get_country_coverage_tokens(country: str) -> List[str]:
     c_low = country.lower().strip()
-    tokens = [c_low, "global"]
+    tokens = [c_low]
     if c_low in ("united arab emirates", "uae", "dubai", "abu dhabi", "sharjah", "ajman"):
         tokens.extend(["united arab emirates", "uae", "gcc", "middle east", "gulf"])
     elif c_low in ("saudi arabia", "saudi", "riyadh", "jeddah", "dammam"):
@@ -425,9 +425,15 @@ def _get_country_coverage_tokens(country: str) -> List[str]:
     elif c_low in ("united states", "usa", "us"):
         tokens.extend(["united states", "usa", "north america", "americas"])
     elif c_low in ("singapore", "malaysia", "thailand", "vietnam", "indonesia", "philippines"):
-        tokens.extend(["asean", "southeast asia", "asia"])
-    elif c_low in ("kenya", "benin", "togo", "nigeria", "south africa", "ghana", "egypt"):
-        tokens.extend(["africa", "east africa", "west africa"])
+        tokens.extend(["asean", "southeast asia"])
+    elif c_low in ("benin", "togo", "nigeria", "ghana", "ivory coast", "senegal", "guinea"):
+        tokens.extend(["west africa"])
+    elif c_low in ("kenya", "tanzania", "uganda", "rwanda", "ethiopia", "djibouti"):
+        tokens.extend(["east africa"])
+    elif c_low in ("south africa", "namibia", "mozambique", "zimbabwe"):
+        tokens.extend(["southern africa", "sadc"])
+    elif c_low in ("egypt", "morocco", "algeria", "tunisia"):
+        tokens.extend(["north africa"])
     return list(dict.fromkeys(tokens))
 
 
@@ -471,12 +477,29 @@ def get_all_sources(
 
     if country and country.lower() not in ("all", "all countries", "global", ""):
         tokens = _get_country_coverage_tokens(country)
-        filtered = [
+        c_low = country.lower().strip()
+        # Direct country matches first, then regional sub-zone matches
+        direct_matches = [
             s for s in sources
-            if any(t in s.get("country_coverage", "").lower() for t in tokens)
+            if c_low in s.get("country_coverage", "").lower() or c_low in s.get("name", "").lower()
         ]
-        if filtered:
-            return filtered
+        regional_matches = [
+            s for s in sources
+            if any(t in s.get("country_coverage", "").lower() for t in tokens if t != c_low)
+            and s not in direct_matches
+        ]
+        # Include universal global tools (Google Maps, Dorks, Customs B/L) but exclude foreign national portals (e.g. FIEO for non-India, KPA for non-Kenya)
+        foreign_portals = ("fieo", "apeda", "dgft", "indian", "kenya", "saudi", "dubai", "kolkata", "cotonou", "dakar", "abidjan")
+        global_sources = [
+            s for s in sources
+            if s.get("country_coverage", "").lower() == "global"
+            and not any(fh in s.get("name", "").lower() for fh in foreign_portals if fh not in c_low)
+            and s not in direct_matches
+            and s not in regional_matches
+        ]
+        combined = direct_matches + regional_matches + global_sources
+        if combined:
+            return combined
 
     return sources
 

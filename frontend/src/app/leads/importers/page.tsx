@@ -578,12 +578,15 @@ function GlobalImportersContent() {
               }`}
             >
               <option value="">All Geographies</option>
-              <option value="United Arab Emirates">United Arab Emirates (Dubai)</option>
-              <option value="Saudi Arabia">Saudi Arabia (Riyadh, Dammam)</option>
-              <option value="Qatar">Qatar (Doha)</option>
-              <option value="Oman">Oman (Muscat)</option>
-              <option value="Kuwait">Kuwait</option>
-              <option value="Bahrain">Bahrain</option>
+              <option value="Togo">🇹🇬 Togo (Lomé Port Hub)</option>
+              <option value="United Arab Emirates">🇦🇪 United Arab Emirates (Dubai)</option>
+              <option value="Saudi Arabia">🇸🇦 Saudi Arabia (Riyadh, Dammam)</option>
+              <option value="Qatar">🇶🇦 Qatar (Doha)</option>
+              <option value="Oman">🇴🇲 Oman (Muscat)</option>
+              <option value="Kuwait">🇰🇼 Kuwait</option>
+              <option value="Bahrain">🇧🇭 Bahrain</option>
+              <option value="Benin">🇧🇯 Benin (Cotonou)</option>
+              <option value="Kenya">🇰🇪 Kenya (Mombasa)</option>
             </select>
 
             <select
