@@ -40,6 +40,15 @@ export interface LeadItem {
   district?: string;
   gstin?: string;
   fssai_or_sfda_status?: string;
+  primary_email?: string;
+  secondary_email?: string;
+  direct_phone?: string;
+  whatsapp_url?: string;
+  linkedin_persona_url?: string;
+  linkedin_profile_url?: string;
+  corporate_contact_page_url?: string;
+  contact_page_url?: string;
+  github_url?: string;
 }
 
 export interface LeadsAggregations {
@@ -79,6 +88,15 @@ export interface NewLeadFormData {
   matched_varieties: string;
   address: string;
   deal_status: string;
+  primary_email?: string;
+  secondary_email?: string;
+  direct_phone?: string;
+  whatsapp_url?: string;
+  linkedin_persona_url?: string;
+  linkedin_profile_url?: string;
+  corporate_contact_page_url?: string;
+  contact_page_url?: string;
+  github_url?: string;
 }
 
 export interface DealFormData {

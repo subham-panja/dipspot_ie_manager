@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { MapPin, MessageSquare, ExternalLink } from 'lucide-react';
+import { MapPin, MessageSquare, ExternalLink, Mail, Phone, Globe } from 'lucide-react';
 import { CustomerLead } from './dossierTypes';
 import AuditMergeTrail from './AuditMergeTrail';
 
@@ -16,16 +16,27 @@ export default function DossierContacts({
   isLight,
   accentTextClass,
 }: DossierContactsProps) {
-  const firstPhone = lead.phones?.split(';')[0]?.split(',')[0]?.trim();
-  const cleanWaNumber = firstPhone?.replace(/[^0-9]/g, '');
-  const firstEmail = lead.emails?.split(';')[0]?.split(',')[0]?.trim();
+  const rawEmails = (lead.emails || '').split(';').map((e) => e.trim()).filter(Boolean);
+  const primaryEmail = lead.primary_email || rawEmails[0] || (lead.emails?.split(',')[0]?.trim());
+  const secondaryEmail =
+    lead.secondary_email ||
+    (rawEmails.length > 1 ? rawEmails[1] : undefined);
 
-  const linkedinUrl =
+  const rawPhones = (lead.phones || '').split(';').map((p) => p.trim()).filter(Boolean);
+  const directPhone = lead.direct_phone || rawPhones[0] || (lead.phones?.split(',')[0]?.trim());
+  const cleanWaNumber = directPhone?.replace(/[^0-9]/g, '');
+
+  const linkedinPersona = lead.linkedin_profile_url || lead.linkedin_persona_url;
+  const linkedinSearchFallback =
     lead.linkedin_search_url ||
     `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(
       lead.company_name + ' Purchase Manager'
     )}`;
+
+  const contactDeskUrl = lead.contact_page_url || lead.corporate_contact_page_url;
+
   const whatsappUrl =
+    lead.whatsapp_url ||
     lead.whatsapp_outreach_url ||
     (cleanWaNumber
       ? `https://wa.me/${cleanWaNumber}?text=${encodeURIComponent(
@@ -34,6 +45,7 @@ export default function DossierContacts({
           }. Could we share our CIF quotation?`
         )}`
       : undefined);
+
   const mapsUrl =
     lead.google_maps_url ||
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
@@ -45,7 +57,7 @@ export default function DossierContacts({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h3 className={`text-xs font-bold uppercase tracking-wider ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-            Verified Contact Dossier
+            Multi-Channel Communication Sources
           </h3>
           {mapsUrl && (
             <a
@@ -65,13 +77,29 @@ export default function DossierContacts({
             isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
           }`}
         >
-          {lead.contact_person && (
-            <div className="flex items-center justify-between">
-              <span className="text-slate-400">Contact Executive:</span>
-              <div className="flex items-center gap-2">
-                <strong className={isLight ? 'text-slate-800' : 'text-white'}>{lead.contact_person}</strong>
+          {/* 1. Contact Person & LinkedIn Persona / Search */}
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400 flex items-center gap-1">
+              <span>Contact Executive:</span>
+            </span>
+            <div className="flex items-center gap-2">
+              <strong className={isLight ? 'text-slate-800' : 'text-white'}>
+                {lead.contact_person || 'Purchase Manager'}
+              </strong>
+              {linkedinPersona ? (
                 <a
-                  href={linkedinUrl}
+                  href={linkedinPersona}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-0.5 rounded bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[10px] font-bold flex items-center gap-1 transition border border-blue-500/30"
+                  title="Verified Decision-Maker LinkedIn Persona Profile"
+                >
+                  <span>in</span>
+                  <span>Persona</span>
+                </a>
+              ) : (
+                <a
+                  href={linkedinSearchFallback}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-2 py-0.5 rounded bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[10px] font-semibold flex items-center gap-1 transition"
@@ -80,15 +108,36 @@ export default function DossierContacts({
                   <span>in</span>
                   <span>LinkedIn</span>
                 </a>
-              </div>
+              )}
+              {lead.github_url && (
+                <a
+                  href={lead.github_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold flex items-center gap-1 transition border border-slate-700"
+                  title="GitHub Profile"
+                >
+                  <span>GitHub</span>
+                </a>
+              )}
             </div>
-          )}
+          </div>
 
-          {firstPhone && (
+          {/* 2. Direct Telephone */}
+          {directPhone && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Direct Phone:</span>
+              <span className="text-slate-400 flex items-center gap-1">
+                <Phone className="w-3 h-3 text-emerald-400" />
+                <span>Direct Telephone:</span>
+              </span>
               <div className="flex items-center gap-2">
-                <span className="font-mono font-medium text-white">{firstPhone}</span>
+                <a
+                  href={`tel:${directPhone.replace(/\s+/g, '')}`}
+                  className="font-mono font-medium text-white hover:text-emerald-400 transition"
+                  title="Click to Call"
+                >
+                  {directPhone}
+                </a>
                 {whatsappUrl && (
                   <a
                     href={whatsappUrl}
@@ -105,21 +154,72 @@ export default function DossierContacts({
             </div>
           )}
 
-          {firstEmail && (
+          {/* 3. Primary Email */}
+          {primaryEmail && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Direct Email:</span>
+              <span className="text-slate-400 flex items-center gap-1">
+                <Mail className="w-3 h-3 text-blue-400" />
+                <span>Primary Email:</span>
+              </span>
               <a
-                href={`mailto:${firstEmail}`}
+                href={`mailto:${primaryEmail}`}
                 className={`font-mono text-xs ${accentTextClass} hover:underline truncate max-w-[200px]`}
+                title="Send Email"
               >
-                {firstEmail}
+                {primaryEmail}
               </a>
             </div>
           )}
 
+          {/* 4. Secondary / Inbox Email */}
+          {secondaryEmail && (
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 flex items-center gap-1">
+                <Mail className="w-3 h-3 text-purple-400" />
+                <span>Secondary / Inbox Email:</span>
+              </span>
+              <div className="flex items-center gap-1.5">
+                <a
+                  href={`mailto:${secondaryEmail}`}
+                  className="font-mono text-xs text-purple-300 hover:underline truncate max-w-[190px]"
+                  title="Secondary Inbox Email"
+                >
+                  {secondaryEmail}
+                </a>
+                <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Inbox
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 5. Corporate Contact Desk Page */}
+          {contactDeskUrl && (
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 flex items-center gap-1">
+                <ExternalLink className="w-3 h-3 text-purple-400" />
+                <span>Contact Desk:</span>
+              </span>
+              <a
+                href={contactDeskUrl.startsWith('http') ? contactDeskUrl : `https://${contactDeskUrl}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-purple-400 hover:underline flex items-center gap-1"
+                title="Corporate Contact Page"
+              >
+                <span className="truncate max-w-[190px]">{contactDeskUrl}</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
+
+          {/* 6. Corporate Website */}
           {lead.website && (
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Corporate Web:</span>
+              <span className="text-slate-400 flex items-center gap-1">
+                <Globe className="w-3 h-3 text-blue-400" />
+                <span>Corporate Web:</span>
+              </span>
               <a
                 href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
                 target="_blank"
@@ -132,6 +232,7 @@ export default function DossierContacts({
             </div>
           )}
 
+          {/* Social Profiles */}
           {lead.twitter_url && (
             <div className="flex items-center justify-between">
               <span className="text-slate-400">Twitter / X:</span>
@@ -162,9 +263,28 @@ export default function DossierContacts({
             </div>
           )}
 
+          {lead.linkedin_company_url && (
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">LinkedIn Company:</span>
+              <a
+                href={lead.linkedin_company_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+              >
+                <span className="truncate max-w-[180px]">{lead.linkedin_company_url.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
+
+          {/* 7. Physical Facility / Address */}
           {lead.address && (
             <div className="pt-2 border-t border-slate-800/60 text-[11px]">
-              <span className="text-slate-400 block mb-0.5">Physical Facility / Office:</span>
+              <span className="text-slate-400 flex items-center gap-1 mb-0.5">
+                <MapPin className="w-3 h-3 text-slate-400" />
+                <span>Physical Facility / Office:</span>
+              </span>
               <span className={isLight ? 'text-slate-700' : 'text-slate-300'}>{lead.address}</span>
             </div>
           )}

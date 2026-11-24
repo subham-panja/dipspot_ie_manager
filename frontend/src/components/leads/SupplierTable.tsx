@@ -11,6 +11,7 @@ import {
   CheckCircle,
   ArrowUpDown,
   Loader2,
+  MessageCircle,
 } from 'lucide-react';
 import { LeadItem } from './leadTypes';
 
@@ -110,6 +111,21 @@ export default function SupplierTable({
             ) : (
               suppliers.map((s) => {
                 const isSelected = selectedIds.has(s.id);
+                const rawEmails = (s.emails || s.email || '').split(';').map((e) => e.trim()).filter(Boolean);
+                const primaryEmail = s.primary_email || rawEmails[0];
+                const secondaryEmail = s.secondary_email || (rawEmails.length > 1 ? rawEmails[1] : undefined);
+
+                const rawPhones = (s.phones || s.phone || '').split(';').map((p) => p.trim()).filter(Boolean);
+                const directPhone = s.direct_phone || rawPhones[0];
+                const cleanPhoneDigits = directPhone?.replace(/[^0-9]/g, '');
+                const whatsappUrl =
+                  s.whatsapp_url ||
+                  s.whatsapp_outreach_url ||
+                  (cleanPhoneDigits ? `https://wa.me/${cleanPhoneDigits}` : undefined);
+
+                const linkedinPersona = s.linkedin_profile_url || s.linkedin_persona_url;
+                const contactDeskUrl = s.contact_page_url || s.corporate_contact_page_url;
+
                 return (
                   <tr
                     key={s.id}
@@ -146,6 +162,65 @@ export default function SupplierTable({
                               <span>{s.gstin}</span>
                             </div>
                           )}
+                          {s.twitter_url && (
+                            <a
+                              href={s.twitter_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[10px] text-sky-400 hover:text-sky-300 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 flex items-center gap-1"
+                              title="Twitter / X Corporate Handle"
+                            >
+                              <span>𝕏 Profile</span>
+                            </a>
+                          )}
+                          {linkedinPersona ? (
+                            <a
+                              href={linkedinPersona}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[10px] text-[#0a66c2] hover:underline font-bold bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 flex items-center gap-1"
+                              title="Verified Decision-Maker LinkedIn Persona Profile"
+                            >
+                              <span>in Persona</span>
+                            </a>
+                          ) : s.linkedin_search_url ? (
+                            <a
+                              href={s.linkedin_search_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[10px] text-[#0a66c2] hover:underline font-bold bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 flex items-center gap-1"
+                              title="Find Purchase Manager on LinkedIn"
+                            >
+                              <span>in Search</span>
+                            </a>
+                          ) : null}
+                          {contactDeskUrl && (
+                            <a
+                              href={contactDeskUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[10px] text-purple-400 hover:underline font-bold bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20 flex items-center gap-1"
+                              title="Corporate Website Contact Desk Page"
+                            >
+                              <span>Contact Desk</span>
+                            </a>
+                          )}
+                          {s.github_url && (
+                            <a
+                              href={s.github_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-[10px] text-slate-300 hover:underline font-bold bg-slate-700/40 px-1.5 py-0.5 rounded border border-slate-600/40 flex items-center gap-1"
+                              title="GitHub Profile"
+                            >
+                              <span>GitHub</span>
+                            </a>
+                          )}
                           {s.google_maps_url && (
                             <a
                               href={s.google_maps_url}
@@ -173,8 +248,9 @@ export default function SupplierTable({
                         {s.district || s.city_or_hub || 'Regional Hub'}, {s.state || s.country || 'India'}
                       </div>
                       {s.address && (
-                        <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={s.address}>
-                          {s.address}
+                        <div className="text-[10px] text-slate-500 truncate max-w-[180px] flex items-center gap-1 mt-0.5" title={s.address}>
+                          <MapPin className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                          <span className="truncate">{s.address}</span>
                         </div>
                       )}
                     </td>
@@ -183,19 +259,50 @@ export default function SupplierTable({
                       <div className="font-medium text-slate-200">
                         {s.contact_person || 'Plant Procurement Head'}
                       </div>
-                      {(s.phone || s.phones) && (
-                        <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono mt-0.5">
-                          <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>{(s.phone || s.phones || '').split(';')[0].trim()}</span>
+                      {directPhone && (
+                        <div>
+                          <a
+                            href={`tel:${directPhone.replace(/\s+/g, '')}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-emerald-400 font-mono mt-0.5"
+                            title="Click to Call"
+                          >
+                            <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>{directPhone}</span>
+                          </a>
+                          {whatsappUrl && (
+                            <a
+                              href={whatsappUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 shadow-sm transition w-fit font-sans"
+                              title="Message on WhatsApp"
+                            >
+                              <MessageCircle className="w-3 h-3 shrink-0" />
+                              <span>WhatsApp Supplier</span>
+                            </a>
+                          )}
                         </div>
                       )}
-                      {(s.email || s.emails) && (
+                      {primaryEmail && (
                         <a
-                          href={`mailto:${(s.email || s.emails || '').split(';')[0].trim()}`}
+                          href={`mailto:${primaryEmail}`}
                           className="text-[11px] text-slate-400 hover:text-emerald-400 flex items-center gap-1 truncate max-w-[170px] mt-0.5"
+                          title="Primary Email"
                         >
                           <Mail className="w-3 h-3 text-slate-500 shrink-0" />
-                          <span className="truncate">{(s.email || s.emails || '').split(';')[0].trim()}</span>
+                          <span className="truncate">{primaryEmail}</span>
+                        </a>
+                      )}
+                      {secondaryEmail && (
+                        <a
+                          href={`mailto:${secondaryEmail}`}
+                          className="text-[10px] text-slate-400 hover:text-emerald-300 flex items-center gap-1 truncate max-w-[170px] mt-0.5"
+                          title="Secondary / Inbox Email"
+                        >
+                          <Mail className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                          <span className="truncate">{secondaryEmail} (Inbox)</span>
                         </a>
                       )}
                     </td>

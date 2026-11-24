@@ -257,7 +257,8 @@ def register_lead_routes(bp):
             "category_or_role", "nearest_port", "shipment_volume", "importer_tier",
             "custom_label", "twitter_url", "linkedin_company_url", "primary_email",
             "secondary_email", "direct_phone", "whatsapp_url", "whatsapp_outreach_url",
-            "linkedin_persona_url", "corporate_contact_page_url"
+            "linkedin_persona_url", "linkedin_profile_url", "corporate_contact_page_url",
+            "contact_page_url", "github_url"
         ]
         doc = {
             "id": next_id,
@@ -309,7 +310,8 @@ def register_lead_routes(bp):
             "gstin", "pan", "fssai_or_sfda_status", "district", "state",
             "nearest_port", "shipment_volume", "importer_tier", "custom_label",
             "primary_email", "secondary_email", "direct_phone", "whatsapp_url",
-            "whatsapp_outreach_url", "linkedin_persona_url", "corporate_contact_page_url",
+            "whatsapp_outreach_url", "linkedin_persona_url", "linkedin_profile_url",
+            "corporate_contact_page_url", "contact_page_url", "github_url",
         ]
         updates = {k: data[k] for k in allowed_fields if k in data}
         updates["updated_at"] = now_iso()

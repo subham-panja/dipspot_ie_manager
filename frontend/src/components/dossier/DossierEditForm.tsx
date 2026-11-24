@@ -103,6 +103,101 @@ export default function DossierEditForm({
         </div>
 
         <div>
+          <label className="block text-slate-400 font-semibold mb-1">Direct Telephone</label>
+          <input
+            type="text"
+            value={editForm.direct_phone || ''}
+            onChange={(e) => setEditForm({ ...editForm, direct_phone: e.target.value })}
+            placeholder="+971 4 123 4567"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-emerald-400 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 font-semibold mb-1">Primary Email</label>
+          <input
+            type="text"
+            value={editForm.primary_email || ''}
+            onChange={(e) => setEditForm({ ...editForm, primary_email: e.target.value })}
+            placeholder="purchase@company.com"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-blue-400 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 font-semibold mb-1">Secondary / Inbox Email</label>
+          <input
+            type="text"
+            value={editForm.secondary_email || ''}
+            onChange={(e) => setEditForm({ ...editForm, secondary_email: e.target.value })}
+            placeholder="desk@company.com"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-purple-300 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 font-semibold mb-1">WhatsApp Outreach URL</label>
+          <input
+            type="text"
+            value={editForm.whatsapp_url || editForm.whatsapp_outreach_url || ''}
+            onChange={(e) =>
+              setEditForm({
+                ...editForm,
+                whatsapp_url: e.target.value,
+                whatsapp_outreach_url: e.target.value,
+              })
+            }
+            placeholder="https://wa.me/971501234567"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-emerald-400 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 font-semibold mb-1">LinkedIn Persona Profile URL</label>
+          <input
+            type="text"
+            value={editForm.linkedin_profile_url || editForm.linkedin_persona_url || ''}
+            onChange={(e) =>
+              setEditForm({
+                ...editForm,
+                linkedin_profile_url: e.target.value,
+                linkedin_persona_url: e.target.value,
+              })
+            }
+            placeholder="https://www.linkedin.com/in/director-profile"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-blue-400 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 font-semibold mb-1">Corporate Contact Desk Page URL</label>
+          <input
+            type="text"
+            value={editForm.contact_page_url || editForm.corporate_contact_page_url || ''}
+            onChange={(e) =>
+              setEditForm({
+                ...editForm,
+                contact_page_url: e.target.value,
+                corporate_contact_page_url: e.target.value,
+              })
+            }
+            placeholder="https://company.com/contact-us"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-purple-400 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-400 font-semibold mb-1">GitHub Profile URL</label>
+          <input
+            type="text"
+            value={editForm.github_url || ''}
+            onChange={(e) => setEditForm({ ...editForm, github_url: e.target.value })}
+            placeholder="https://github.com/company"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-slate-300 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        <div>
           <label className="block text-slate-400 font-semibold mb-1">Entity Role</label>
           <select
             value={editForm.lead_type || 'importer'}

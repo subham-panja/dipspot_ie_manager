@@ -33,6 +33,21 @@ export default function LeadTableRow({
   isLight,
   accentBgClass,
 }: LeadTableRowProps) {
+  const rawEmails = (cust.emails || cust.email || '').split(';').map((e) => e.trim()).filter(Boolean);
+  const primaryEmail = cust.primary_email || rawEmails[0];
+  const secondaryEmail = cust.secondary_email || (rawEmails.length > 1 ? rawEmails[1] : undefined);
+
+  const rawPhones = (cust.phones || cust.phone || '').split(';').map((p) => p.trim()).filter(Boolean);
+  const directPhone = cust.direct_phone || rawPhones[0];
+  const cleanPhoneDigits = directPhone?.replace(/[^0-9]/g, '');
+  const whatsappUrl =
+    cust.whatsapp_url ||
+    cust.whatsapp_outreach_url ||
+    (cleanPhoneDigits ? `https://wa.me/${cleanPhoneDigits}` : undefined);
+
+  const linkedinPersona = cust.linkedin_profile_url || cust.linkedin_persona_url;
+  const contactDeskUrl = cust.contact_page_url || cust.corporate_contact_page_url;
+
   return (
     <tr
       className={`transition ${
@@ -84,7 +99,18 @@ export default function LeadTableRow({
               </a>
             )}
 
-            {cust.linkedin_search_url && (
+            {linkedinPersona ? (
+              <a
+                href={linkedinPersona}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] text-[#0a66c2] hover:underline font-bold bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 flex items-center gap-1"
+                title="Verified Decision-Maker LinkedIn Persona Profile"
+              >
+                <span>in Persona</span>
+              </a>
+            ) : cust.linkedin_search_url ? (
               <a
                 href={cust.linkedin_search_url}
                 target="_blank"
@@ -94,6 +120,32 @@ export default function LeadTableRow({
                 title="Find Purchase Manager on LinkedIn"
               >
                 <span>in Search</span>
+              </a>
+            ) : null}
+
+            {contactDeskUrl && (
+              <a
+                href={contactDeskUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] text-purple-400 hover:underline font-bold bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20 flex items-center gap-1"
+                title="Corporate Website Contact Desk Page"
+              >
+                <span>Contact Desk</span>
+              </a>
+            )}
+
+            {cust.github_url && (
+              <a
+                href={cust.github_url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] text-slate-300 hover:underline font-bold bg-slate-700/40 px-1.5 py-0.5 rounded border border-slate-600/40 flex items-center gap-1"
+                title="GitHub Profile"
+              >
+                <span>GitHub</span>
               </a>
             )}
 
@@ -150,8 +202,9 @@ export default function LeadTableRow({
           </div>
         )}
         {cust.address && (
-          <div className="text-[10px] text-slate-500 truncate max-w-[180px]" title={cust.address}>
-            {cust.address}
+          <div className="text-[10px] text-slate-500 truncate max-w-[180px] flex items-center gap-1 mt-0.5" title={cust.address}>
+            <MapPin className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+            <span className="truncate">{cust.address}</span>
           </div>
         )}
       </td>
@@ -160,27 +213,43 @@ export default function LeadTableRow({
         <div className="font-medium text-slate-200">
           {cust.contact_person || 'Purchase Manager'}
         </div>
-        {(cust.email || cust.emails) && (
+        {primaryEmail && (
           <a
-            href={`mailto:${(cust.email || cust.emails || '').split(';')[0].trim()}`}
+            href={`mailto:${primaryEmail}`}
             className="text-[11px] text-slate-400 hover:text-blue-400 flex items-center gap-1 truncate max-w-[180px] mt-0.5"
+            title="Primary Email"
           >
             <Mail className="w-3 h-3 text-slate-500 shrink-0" />
-            <span className="truncate">{(cust.email || cust.emails || '').split(';')[0].trim()}</span>
+            <span className="truncate">{primaryEmail}</span>
+          </a>
+        )}
+        {secondaryEmail && (
+          <a
+            href={`mailto:${secondaryEmail}`}
+            className="text-[10px] text-slate-400 hover:text-blue-300 flex items-center gap-1 truncate max-w-[180px] mt-0.5"
+            title="Secondary / Inbox Email"
+          >
+            <Mail className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+            <span className="truncate">{secondaryEmail} (Inbox)</span>
           </a>
         )}
       </td>
 
       <td className="py-3 px-3 font-mono text-slate-300">
-        {cust.phone || cust.phones ? (
+        {directPhone ? (
           <div>
-            <div className="flex items-center gap-1 text-[11px]">
+            <a
+              href={`tel:${directPhone.replace(/\s+/g, '')}`}
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center gap-1 text-[11px] hover:text-emerald-400 transition"
+              title="Click to Call"
+            >
               <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
-              <span>{(cust.phone || cust.phones || '').split(';')[0].trim()}</span>
-            </div>
-            {cust.whatsapp_outreach_url && (
+              <span>{directPhone}</span>
+            </a>
+            {whatsappUrl && (
               <a
-                href={cust.whatsapp_outreach_url}
+                href={whatsappUrl}
                 target="_blank"
                 rel="noreferrer"
                 onClick={(e) => e.stopPropagation()}

@@ -131,6 +131,39 @@ class TestLeadsAPI:
         resp = client.get("/api/leads/99999")
         assert resp.status_code == 404
 
+    def test_update_lead_multichannel_fields(self, client, app, sample_lead_data):
+        resp = client.post("/api/leads", data=json.dumps(sample_lead_data), content_type="application/json")
+        lead_id = resp.get_json()["lead"]["id"]
+
+        patch_data = {
+            "primary_email": "direct.ceo@alfazal.ae",
+            "secondary_email": "import.desk@alfazal.ae",
+            "direct_phone": "+97142233445",
+            "whatsapp_url": "https://wa.me/97142233445",
+            "linkedin_persona_url": "https://linkedin.com/in/director-alfazal",
+            "linkedin_profile_url": "https://linkedin.com/in/director-alfazal",
+            "corporate_contact_page_url": "https://alfazal.ae/contact-us",
+            "contact_page_url": "https://alfazal.ae/contact-us",
+            "github_url": "https://github.com/alfazal-trading",
+        }
+        patch_resp = client.patch(f"/api/leads/{lead_id}", data=json.dumps(patch_data), content_type="application/json")
+        assert patch_resp.status_code == 200
+        updated = patch_resp.get_json()["lead"]
+        assert updated["primary_email"] == "direct.ceo@alfazal.ae"
+        assert updated["secondary_email"] == "import.desk@alfazal.ae"
+        assert updated["direct_phone"] == "+97142233445"
+        assert updated["linkedin_persona_url"] == "https://linkedin.com/in/director-alfazal"
+        assert updated["linkedin_profile_url"] == "https://linkedin.com/in/director-alfazal"
+        assert updated["corporate_contact_page_url"] == "https://alfazal.ae/contact-us"
+        assert updated["contact_page_url"] == "https://alfazal.ae/contact-us"
+        assert updated["github_url"] == "https://github.com/alfazal-trading"
+
+        # Cleanup
+        from app.models import db, Lead
+        with app.app_context():
+            Lead.query.delete()
+            db.session.commit()
+
     def test_delete_lead(self, client, app, sample_lead_data):
         resp = client.post("/api/leads", data=json.dumps(sample_lead_data), content_type="application/json")
         lead_id = resp.get_json()["lead"]["id"]
@@ -192,8 +225,39 @@ class TestExportCSVAPI:
     def test_export_csv_empty(self, client):
         resp = client.get("/api/leads/export")
         assert resp.status_code == 200
-        # Should still have headers
+        # Should still have headers including multi-channel fields
         assert b"company_name" in resp.data
+        for field in [b"primary_email", b"secondary_email", b"direct_phone", b"whatsapp_url", b"linkedin_persona_url", b"linkedin_profile_url", b"corporate_contact_page_url", b"contact_page_url", b"github_url"]:
+            assert field in resp.data
+
+    def test_export_json_multichannel_fields(self, client, app, sample_lead_data):
+        lead_data = dict(sample_lead_data)
+        lead_data.update({
+            "primary_email": "primary@alfazal.ae",
+            "secondary_email": "inbox@alfazal.ae",
+            "direct_phone": "+971501234567",
+            "whatsapp_url": "https://wa.me/971501234567",
+            "linkedin_persona_url": "https://linkedin.com/in/alfazal-director",
+            "linkedin_profile_url": "https://linkedin.com/in/alfazal-director",
+            "corporate_contact_page_url": "https://alfazal.ae/contact",
+            "contact_page_url": "https://alfazal.ae/contact",
+            "github_url": "https://github.com/alfazal",
+        })
+        client.post("/api/leads", data=json.dumps(lead_data), content_type="application/json")
+        resp = client.get("/api/leads/export/json")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) >= 1
+        exported = data[0]
+        assert "primary_email" in exported
+        assert "secondary_email" in exported
+        assert "direct_phone" in exported
+        assert "whatsapp_url" in exported
+        assert "linkedin_persona_url" in exported
+        assert "linkedin_profile_url" in exported
+        assert "corporate_contact_page_url" in exported
+        assert "contact_page_url" in exported
+        assert "github_url" in exported
 
 
 class TestScrapeAPI:
