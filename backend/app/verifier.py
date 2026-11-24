@@ -1,11 +1,7 @@
 """
-Network, DNS, and Authenticity Verification Engine.
+Network, DNS, and authenticity verification engine.
 
-Guarantees 100% genuine data:
-- Verifies that domains resolve to real IP addresses via socket.getaddrinfo/gethostbyname.
-- Verifies HTTP reachability (HTTP 200, 301, 302, 403, etc.).
-- Verifies that email domains resolve DNS and are not synthetic manufactured strings.
-- Disallows synthetic clean_slug + ".com" or manufactured trade@/info@/procurement@ placeholders.
+Verifies domains resolve via DNS and HTTP reachability, checking for valid trade emails.
 """
 
 import logging

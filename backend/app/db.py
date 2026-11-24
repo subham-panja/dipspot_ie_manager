@@ -6,6 +6,7 @@ import pymongo
 from pymongo import MongoClient
 from pymongo.database import Database
 from dotenv import load_dotenv
+from app.models import db
 
 load_dotenv()
 

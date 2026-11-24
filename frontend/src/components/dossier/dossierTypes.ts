@@ -1,0 +1,55 @@
+export interface CustomerLead {
+  id: number;
+  company_name: string;
+  country: string;
+  city_or_hub?: string;
+  contact_person?: string;
+  phones?: string;
+  emails?: string;
+  website?: string;
+  address?: string;
+  matched_varieties?: string;
+  commodities_list?: string[];
+  hs_codes_applicable?: string;
+  priority_score: number;
+  lead_type: string;
+  gstin?: string;
+  pan?: string;
+  fssai_or_sfda_status?: string;
+  state?: string;
+  district?: string;
+  latitude?: number;
+  longitude?: number;
+  nearest_port?: string;
+  trade_role?: string;
+  annual_volume_est?: string;
+  risk_tier?: string;
+  key_trade_lanes?: string[];
+  duplicate_probability?: number;
+  duplicate_status?: string;
+  source_name?: string;
+  source_url?: string;
+  custom_label?: string;
+  extraction_notes?: string;
+  merge_count?: number;
+  merged_history?: any[];
+  shipment_volume?: string;
+  importer_tier?: string;
+  whatsapp_outreach_url?: string;
+  linkedin_search_url?: string;
+  google_maps_url?: string;
+  twitter_url?: string;
+  facebook_url?: string;
+  instagram_url?: string;
+  linkedin_company_url?: string;
+  customs_manifest_data?: any;
+}
+
+export interface CustomerDossierProps {
+  customer: CustomerLead | null;
+  onClose: () => void;
+  onConvertToDeal?: (customer: CustomerLead) => void;
+  onConvert?: (customer?: any) => void;
+  onEnroll?: (customer: CustomerLead) => void;
+  onUpdated?: (updated: CustomerLead) => void;
+}
