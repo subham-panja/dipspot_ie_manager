@@ -1,9 +1,11 @@
 """API helper utilities for serialization, sorting, and MongoDB queries."""
 
+import json
 import re
 import urllib.parse
 from typing import Dict, List, Optional, Tuple
 from bson import ObjectId
+from app.contacts_service import canonical_lead_id, get_contacts_count_map
 
 CSV_EXPORT_FIELDS = [
     "id",
@@ -37,6 +39,7 @@ CSV_EXPORT_FIELDS = [
     "deal_status",
     "nearest_port",
     "shipment_volume",
+    "annual_volume_est",
     "importer_tier",
     "customs_manifest_data",
     "whatsapp_outreach_url",
@@ -44,13 +47,40 @@ CSV_EXPORT_FIELDS = [
     "google_maps_url",
     "twitter_url",
     "facebook_url",
+    "origin_state",
+    "b2b_directory",
+    "harvest_date",
     "source_name",
     "source_url",
+    "source_category",
+    "source_reliability",
+    "contacts_count",
     "created_at",
 ]
 
 
-def serialize_mongo_lead(doc: dict) -> dict:
+def _infer_b2b_directory(doc: dict) -> str:
+    explicit = str(doc.get("b2b_directory") or "").strip()
+    if explicit:
+        return explicit
+    src = f"{doc.get('source_url') or ''} {doc.get('source_name') or ''}".lower()
+    directory_map = (
+        ("go4worldbusiness", "Go4WorldBusiness"),
+        ("indiamart", "IndiaMART"),
+        ("wbrma", "WBRMA Member Directory"),
+        ("apeda", "APEDA Trade Registry"),
+        ("exportmandi", "ExportMandi"),
+        ("tradeindia", "TradeIndia"),
+        ("kompass", "Kompass"),
+        ("alibaba", "Alibaba Trade"),
+    )
+    for token, label in directory_map:
+        if token in src:
+            return label
+    return str(doc.get("source_name") or "Global Verified Trade Directory")
+
+
+def serialize_mongo_lead(doc: dict, contacts_count: Optional[int] = None) -> dict:
     if not doc:
         return {}
     lead_id = doc.get("id")
@@ -132,11 +162,17 @@ def serialize_mongo_lead(doc: dict) -> dict:
     ]
 
     matched_varieties = doc.get("matched_varieties") or ""
-    varieties = [v.strip() for v in matched_varieties.split(";") if v.strip()]
-    if not varieties:
-        varieties = [v.strip() for v in matched_varieties.split(",") if v.strip()]
-    if not varieties:
-        varieties = ["Non-Basmati Grains", "Parboiled Cargo", "Agricultural Merchandise"]
+    raw_commodities = doc.get("commodities_list")
+    if isinstance(raw_commodities, list) and raw_commodities:
+        varieties = [str(v).strip() for v in raw_commodities if str(v).strip()]
+    elif isinstance(raw_commodities, str) and raw_commodities.strip():
+        varieties = [v.strip() for v in re.split(r"[;,]", raw_commodities) if v.strip()]
+    else:
+        varieties = [v.strip() for v in matched_varieties.split(";") if v.strip()]
+        if not varieties:
+            varieties = [v.strip() for v in matched_varieties.split(",") if v.strip()]
+        if not varieties:
+            varieties = ["Non-Basmati Grains", "Parboiled Cargo", "Agricultural Merchandise"]
 
     company_name = doc.get("company_name") or ""
     contact_person = doc.get("contact_person") or ""
@@ -212,13 +248,13 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "hs_codes_applicable": doc.get("hs_codes_applicable") or "10063019; 10063090",
         "inquiry_or_profile": doc.get("inquiry_or_profile") or "",
         "priority_score": priority_score,
-        "source_url": doc.get("source_url") or "",
         "lead_type": lead_type,
         "gstin": doc.get("gstin") or "",
         "pan": doc.get("pan") or "",
         "iec_code": doc.get("iec_code") or doc.get("registration_number") or "",
         "fssai_or_sfda_status": doc.get("fssai_or_sfda_status") or "",
         "state": doc.get("state") or "",
+        "origin_state": doc.get("origin_state") or doc.get("state") or "",
         "district": district,
         "category_or_role": doc.get("category_or_role") or "",
         "deal_status": doc.get("deal_status") or "unassigned",
@@ -241,8 +277,15 @@ def serialize_mongo_lead(doc: dict) -> dict:
         "linkedin_company_url": doc.get("linkedin_company_url") or "",
         "source_name": doc.get("source_name") or "Global Verified Trade Directory",
         "source_url": doc.get("source_url") or "",
-        "source_category": doc.get("source_category") or "Commercial Trade Manifest",
-        "source_reliability": int(doc.get("source_reliability") or 96),
+        "source_category": doc.get("source_category") or ("Commercial Trade Manifest" if is_imp else "B2B Trade Directory"),
+        "source_reliability": (
+            int(doc["source_reliability"])
+            if doc.get("source_reliability") is not None and doc.get("source_reliability") != ""
+            else 96
+        ),
+        "b2b_directory": _infer_b2b_directory(doc),
+        "harvest_date": str(doc.get("harvest_date") or doc.get("created_at") or ""),
+        "contacts_count": int(contacts_count if contacts_count is not None else (doc.get("contacts_count") or 0)),
         "duplicate_probability": round(float(doc.get("duplicate_probability") if doc.get("duplicate_probability") is not None else 7.5), 1),
         "duplicate_status": doc.get("duplicate_status") or ("duplicate" if float(doc.get("duplicate_probability") or 0) >= 75.0 else ("partial_match" if float(doc.get("duplicate_probability") or 0) >= 30.0 else "unique")),
         "custom_label": doc.get("custom_label") or "",
@@ -291,13 +334,21 @@ def paginate_cursor(mongo_db, filter_q, default_per_page=25, max_per_page=250):
     pages = (total + per_page - 1) // per_page if total > 0 else 0
     sort_by = request.args.get("sort_by", "date_desc")
     sort_order = parse_sort_param(sort_by)
-    cursor = mongo_db.leads.find(filter_q).sort(sort_order).skip(skip).limit(per_page)
-    leads = [serialize_mongo_lead(doc) for doc in cursor]
+    docs = list(mongo_db.leads.find(filter_q).sort(sort_order).skip(skip).limit(per_page))
+    counts_map = get_contacts_count_map(mongo_db, docs)
+    leads = [
+        serialize_mongo_lead(doc, contacts_count=counts_map.get(canonical_lead_id(doc), 0))
+        for doc in docs
+    ]
     return leads, total, page, pages, per_page
 
 
 def sync_lead_to_sqlite(doc, db, Lead):
     try:
+        manifest_raw = doc.get("customs_manifest_data", "")
+        manifest_str = json.dumps(manifest_raw) if isinstance(manifest_raw, (dict, list)) else str(manifest_raw or "")
+        sr_raw = doc.get("source_reliability")
+        sr_val = int(sr_raw) if sr_raw is not None and sr_raw != "" else 96
         lead_sq = Lead(
             id=doc.get("id"),
             company_name=doc.get("company_name", ""),
@@ -320,8 +371,22 @@ def sync_lead_to_sqlite(doc, db, Lead):
             state=doc.get("state", ""),
             district=doc.get("district", ""),
             category_or_role=doc.get("category_or_role", ""),
+            origin_state=doc.get("origin_state", ""),
+            b2b_directory=doc.get("b2b_directory", ""),
+            harvest_date=doc.get("harvest_date", ""),
+            customs_manifest_data=manifest_str,
+            source_name=doc.get("source_name", ""),
+            source_category=doc.get("source_category", ""),
+            source_reliability=sr_val,
+            shipment_volume=doc.get("shipment_volume", ""),
+            annual_volume_est=doc.get("annual_volume_est", ""),
+            nearest_port=doc.get("nearest_port", ""),
+            extraction_notes=doc.get("extraction_notes", ""),
         )
         db.session.add(lead_sq)
         db.session.commit()
     except Exception:
-        pass
+        try:
+            db.session.rollback()
+        except Exception:
+            pass

@@ -66,7 +66,20 @@ def clean_db(app):
 
         try:
             mongo_db = get_db()
-            for col in ["leads", "deals", "shipments", "campaigns", "customer_segments", "dispatched_messages"]:
+            for col in [
+                "leads",
+                "deals",
+                "shipments",
+                "campaigns",
+                "customer_segments",
+                "dispatched_messages",
+                "contacts",
+                "company_contacts",
+                "lead_notes",
+                "campaign_enrollments",
+                "omnichannel_messages",
+                "cadence_enrollments",
+            ]:
                 mongo_db[col].delete_many({})
         except Exception:
             pass

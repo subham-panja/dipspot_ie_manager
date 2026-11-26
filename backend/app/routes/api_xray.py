@@ -2,12 +2,19 @@
 
 import logging
 import urllib.parse
+from typing import Any, List, Optional, Tuple
 from flask import Blueprint, jsonify, request
 
+from app.contacts_service import (
+    ContactConflictError,
+    serialize_contacts_batch,
+    upsert_and_link_contact,
+)
 from app.db import get_db, now_iso
 from app.models import Lead, db
 from app.routes.api_helpers import find_mongo_lead, serialize_mongo_lead
 from app.scraper.scraper_class import RealisticWebScraper
+from app.scraper.xray_providers import build_genuine_fallbacks
 from app.scraper.xray_search import (
     DEFAULT_DECISION_MAKER_TITLES,
     build_xray_query,
@@ -16,42 +23,59 @@ from app.scraper.xray_search import (
 logger = logging.getLogger(__name__)
 
 
+def _parse_list_param(raw_val: Any) -> Optional[List[str]]:
+    if isinstance(raw_val, str):
+        items = [x.strip() for x in raw_val.split(",") if x.strip()]
+        return items or None
+    if isinstance(raw_val, list):
+        items = [str(x).strip() for x in raw_val if x and str(x).strip()]
+        return items or None
+    return None
+
+
+def _parse_bool(val: Any) -> bool:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return val != 0
+    if isinstance(val, str):
+        return val.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _parse_max_results(raw_val: Any, default: int = 10) -> int:
+    if raw_val is None or raw_val == "":
+        return default
+    try:
+        return min(max(1, int(raw_val)), 20)
+    except (ValueError, TypeError):
+        return default
+
+
+def _extract_request_data() -> Tuple[Optional[dict], Optional[tuple]]:
+    if request.method == "POST":
+        raw_json = request.get_json(silent=True)
+        if raw_json is not None and not isinstance(raw_json, dict):
+            return None, (jsonify({"error": "JSON object body required"}), 400)
+        return (raw_json or {}), None
+    return request.args.to_dict(), None
+
+
 def register_xray_routes(bp: Blueprint):
     @bp.route("/xray/query", methods=["GET", "POST"])
     def generate_xray_query():
         """Constructs targeted Boolean X-ray search queries for professional profiles."""
-        if request.method == "POST":
-            data = request.get_json(silent=True) or {}
-        else:
-            data = request.args.to_dict()
+        data, err_resp = _extract_request_data()
+        if err_resp:
+            return err_resp
 
-        company_name = (data.get("company_name") or "").strip()
-        country = (data.get("country") or "").strip()
-        platform = (data.get("platform") or "linkedin").strip()
+        company_name = str(data.get("company_name") or "").strip()
+        country = str(data.get("country") or "").strip()
+        platform = str(data.get("platform") or "linkedin").strip() or "linkedin"
 
-        raw_titles = data.get("job_titles")
-        if isinstance(raw_titles, str):
-            job_titles = [t.strip() for t in raw_titles.split(",") if t.strip()]
-        elif isinstance(raw_titles, list):
-            job_titles = [str(t).strip() for t in raw_titles if t and str(t).strip()]
-        else:
-            job_titles = None
-
-        raw_kw = data.get("keywords")
-        if isinstance(raw_kw, str):
-            keywords = [k.strip() for k in raw_kw.split(",") if k.strip()]
-        elif isinstance(raw_kw, list):
-            keywords = [str(k).strip() for k in raw_kw if k and str(k).strip()]
-        else:
-            keywords = None
-
-        raw_ex = data.get("exclusions")
-        if isinstance(raw_ex, str):
-            exclusions = [x.strip() for x in raw_ex.split(",") if x.strip()]
-        elif isinstance(raw_ex, list):
-            exclusions = [str(x).strip() for x in raw_ex if x and str(x).strip()]
-        else:
-            exclusions = None
+        job_titles = _parse_list_param(data.get("job_titles"))
+        keywords = _parse_list_param(data.get("keywords"))
+        exclusions = _parse_list_param(data.get("exclusions"))
 
         query = build_xray_query(
             company_name=company_name,
@@ -80,46 +104,31 @@ def register_xray_routes(bp: Blueprint):
 
     @bp.route("/xray/search", methods=["POST", "GET"])
     def search_xray():
-        """Executes live RecruitIn X-ray search via DuckDuckGo and Bing for company personnel."""
-        if request.method == "POST":
-            data = request.get_json(silent=True) or {}
-        else:
-            data = request.args.to_dict()
+        """Executes live RecruitIn X-ray search via DDG, Bing, and Google with zero-mock fallbacks."""
+        data, err_resp = _extract_request_data()
+        if err_resp:
+            return err_resp
 
-        company_name = (data.get("company_name") or "").strip()
+        company_name = str(data.get("company_name") or "").strip()
         if not company_name:
             return jsonify({"error": "company_name is required"}), 400
 
-        country = (data.get("country") or "").strip()
-        platform = (data.get("platform") or "linkedin").strip()
-        try:
-            max_results = min(int(data.get("max_results", 5)), 25)
-        except (ValueError, TypeError):
-            max_results = 5
+        country = str(data.get("country") or "").strip()
+        platform = str(data.get("platform") or "linkedin").strip() or "linkedin"
+        max_results = _parse_max_results(data.get("max_results"), default=10)
 
-        raw_titles = data.get("job_titles")
-        if isinstance(raw_titles, str):
-            job_titles = [t.strip() for t in raw_titles.split(",") if t.strip()]
-        elif isinstance(raw_titles, list):
-            job_titles = [str(t).strip() for t in raw_titles if t and str(t).strip()]
-        else:
-            job_titles = None
+        job_titles = _parse_list_param(data.get("job_titles"))
+        keywords = _parse_list_param(data.get("keywords"))
+        exclusions = _parse_list_param(data.get("exclusions"))
 
-        raw_kw = data.get("keywords")
-        if isinstance(raw_kw, str):
-            keywords = [k.strip() for k in raw_kw.split(",") if k.strip()]
-        elif isinstance(raw_kw, list):
-            keywords = [str(k).strip() for k in raw_kw if k and str(k).strip()]
-        else:
-            keywords = None
-
-        raw_ex = data.get("exclusions")
-        if isinstance(raw_ex, str):
-            exclusions = [x.strip() for x in raw_ex.split(",") if x.strip()]
-        elif isinstance(raw_ex, list):
-            exclusions = [str(x).strip() for x in raw_ex if x and str(x).strip()]
-        else:
-            exclusions = None
+        query = build_xray_query(
+            company_name=company_name,
+            job_titles=job_titles,
+            country=country,
+            platform=platform,
+            keywords=keywords,
+            exclusions=exclusions,
+        )
 
         scraper = RealisticWebScraper(enable_proxy_shield=False)
         profiles = scraper.search_xray_profiles(
@@ -132,13 +141,67 @@ def register_xray_routes(bp: Blueprint):
             exclusions=exclusions,
         )
 
+        fallback_used = len(profiles) == 0
+        engine_used = (getattr(scraper, "last_xray_engine", "") or "duckduckgo") if profiles else "fallback"
+        search_status = getattr(scraper, "last_xray_status", "") or ("live_results" if profiles else "no_results")
+
+        website = str(data.get("website") or "").strip()
+        fallbacks = build_genuine_fallbacks(
+            company_name=company_name,
+            country=country,
+            website=website,
+            platform=platform,
+            strict_query=query,
+            status=search_status,
+        )
+
+        persisted_contacts = []
+        lead_id = data.get("lead_id")
+        if _parse_bool(data.get("persist")) and lead_id and profiles:
+            mongo_db = get_db()
+            lead_doc = find_mongo_lead(mongo_db, lead_id)
+            if lead_doc and not lead_doc.get("is_deleted"):
+                source_tag = "xray_linkedin" if platform.lower() == "linkedin" else f"xray_{platform.lower()}"
+                seen_cids = set()
+                persisted_docs = []
+                for p in profiles:
+                    payload = {
+                        "full_name": p.get("name") or "",
+                        "job_title": p.get("title") or "",
+                        "role_at_company": p.get("title") or "",
+                        "company_name": company_name,
+                        "linkedin_profile_url": p.get("profile_url") or "",
+                        "verified": True,
+                    }
+                    try:
+                        c_doc, _ = upsert_and_link_contact(
+                            mongo_db,
+                            payload,
+                            lead_doc=lead_doc,
+                            source=source_tag,
+                        )
+                    except ContactConflictError as exc:
+                        logger.warning("Skipping conflicting X-ray contact %s: %s", payload.get("linkedin_profile_url"), exc)
+                        continue
+                    cid = c_doc.get("contact_id")
+                    if cid and cid not in seen_cids:
+                        seen_cids.add(cid)
+                        persisted_docs.append(c_doc)
+                persisted_contacts = serialize_contacts_batch(mongo_db, persisted_docs)
+
         return jsonify({
             "success": True,
             "company_name": company_name,
             "country": country,
             "platform": platform,
+            "query": query,
+            "engine_used": engine_used,
+            "status": search_status,
+            "fallback_used": fallback_used,
             "count": len(profiles),
             "profiles": profiles,
+            "persisted_contacts": persisted_contacts,
+            "fallbacks": fallbacks,
         })
 
     @bp.route("/leads/<lead_id>/enrich", methods=["POST"])
@@ -146,7 +209,7 @@ def register_xray_routes(bp: Blueprint):
         """Enriches a specific lead with multi-channel communication sources using X-ray discovery."""
         mongo_db = get_db()
         lead = find_mongo_lead(mongo_db, lead_id)
-        if not lead:
+        if not lead or lead.get("is_deleted"):
             return jsonify({"error": f"Lead {lead_id} not found"}), 404
 
         scraper = RealisticWebScraper(enable_proxy_shield=False)

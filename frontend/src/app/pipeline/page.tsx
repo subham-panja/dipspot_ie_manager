@@ -3,7 +3,9 @@
 import React, { useState } from 'react';
 import Shell from '@/components/Shell';
 import { useTheme } from '@/context/ThemeContext';
-import CustomerDossier from '@/components/CustomerDossier';
+import CustomerDossier, { CustomerLead } from '@/components/CustomerDossier';
+import DossierEnrollModal from '@/components/dossier/DossierEnrollModal';
+import { fetchJson } from '@/lib/api';
 import { Deal, NewDealFormData, NewStageFormData } from '@/components/pipeline/pipelineTypes';
 import PipelineHeader from '@/components/pipeline/PipelineHeader';
 import PipelineFilterBar from '@/components/pipeline/PipelineFilterBar';
@@ -25,7 +27,9 @@ export default function PipelineKanbanPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-  const [dossierCustomer, setDossierCustomer] = useState<any | null>(null);
+  const [dossierCustomer, setDossierCustomer] = useState<CustomerLead | null>(null);
+  const [enrollCustomer, setEnrollCustomer] = useState<CustomerLead | null>(null);
+  const [enrollContactId, setEnrollContactId] = useState<string>('');
 
   const {
     stages,
@@ -58,14 +62,43 @@ export default function PipelineKanbanPage() {
     setSelectedDeal(null);
   };
 
-  const openDossierForDeal = (deal: Deal) => {
+  const openDossierForDeal = async (deal: Deal) => {
+    try {
+      if (deal.lead_id && String(deal.lead_id) !== '9999') {
+        const res = await fetchJson<{ lead: CustomerLead }>(
+          `/leads/${encodeURIComponent(String(deal.lead_id))}`
+        );
+        if (res?.lead) {
+          setDossierCustomer(res.lead);
+          return;
+        }
+      }
+    } catch {
+      // Fall through to company_name search
+    }
+
+    try {
+      const searchRes = await fetchJson<{ leads: CustomerLead[] }>(
+        `/leads?search=${encodeURIComponent(deal.company_name)}`
+      );
+      const matches = searchRes?.leads || [];
+      const exact = matches.find(
+        (l) => l.company_name?.trim().toLowerCase() === deal.company_name.trim().toLowerCase()
+      );
+      if (exact || matches[0]) {
+        setDossierCustomer(exact || matches[0]);
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to resolve directory lead for pipeline deal', err);
+    }
+
     setDossierCustomer({
-      id: 9999,
+      id: 0,
       company_name: deal.company_name,
       country: deal.country,
-      contact_person: 'Executive Trade Buyer Desk',
       matched_varieties: deal.commodity,
-      priority_score: 85,
+      priority_score: 0,
       lead_type: 'importer',
     });
   };
@@ -186,11 +219,28 @@ export default function PipelineKanbanPage() {
 
       <CustomerDossier
         customer={dossierCustomer}
+        isEnrollModalOpen={!!enrollCustomer}
         onClose={() => setDossierCustomer(null)}
         onConvertToDeal={() => {
           setDossierCustomer(null);
           setShowNewModal(true);
         }}
+        onEnroll={(c, contactId) => {
+          setEnrollCustomer(c);
+          setEnrollContactId(contactId || '');
+        }}
+        onUpdated={(updated) => setDossierCustomer(updated)}
+      />
+      <DossierEnrollModal
+        isOpen={!!enrollCustomer}
+        lead={enrollCustomer}
+        initialContactId={enrollContactId}
+        onClose={() => {
+          setEnrollCustomer(null);
+          setEnrollContactId('');
+        }}
+        isLight={isLight}
+        accentBgClass={`${accentClasses.bg} ${accentClasses.bgHover}`}
       />
     </Shell>
   );

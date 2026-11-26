@@ -8,6 +8,7 @@ export interface Stage {
 
 export interface Deal {
   deal_id: string;
+  lead_id?: string | number;
   title: string;
   company_name: string;
   country: string;

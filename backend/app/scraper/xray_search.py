@@ -4,25 +4,19 @@ import logging
 import re
 import urllib.parse
 from typing import Any, Dict, List, Optional
-from bs4 import BeautifulSoup
 
-from app.lead_engine import clean_company_name
-from app.scraper.http_client import decode_bing_u
+from app.scraper.xray_providers import (
+    DEFAULT_DECISION_MAKER_TITLES,
+    _normalize_website_base,
+    build_bing_xray_query,
+    build_genuine_fallbacks,
+    build_relaxed_xray_query,
+    clean_company_for_xray,
+    parse_xray_serp_title_and_snippet,
+    query_xray_provider,
+)
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_DECISION_MAKER_TITLES: List[str] = [
-    "Procurement Director",
-    "Import Manager",
-    "Purchasing Head",
-    "Purchase Manager",
-    "Head of Sourcing",
-    "Chief Executive Officer",
-    "CEO",
-    "Managing Director",
-    "Commercial Director",
-    "Buyer",
-]
 
 
 def build_xray_query(
@@ -53,8 +47,6 @@ def build_xray_query(
 
     quoted_titles: List[str] = []
     for t in titles:
-        if not t:
-            continue
         t_clean = str(t).strip()
         if not t_clean:
             continue
@@ -64,7 +56,6 @@ def build_xray_query(
             quoted_titles.append(t_clean)
 
     tokens: List[str] = [site_prefix]
-
     if quoted_titles:
         tokens.append(f"({' OR '.join(quoted_titles)})")
 
@@ -97,125 +88,9 @@ def build_xray_query(
         ex_clean = str(ex).strip()
         if not ex_clean:
             continue
-        if not ex_clean.startswith("-"):
-            tokens.append(f"-{ex_clean}")
-        else:
-            tokens.append(ex_clean)
+        tokens.append(ex_clean if ex_clean.startswith("-") else f"-{ex_clean}")
 
     return " ".join(tokens)
-
-
-def parse_xray_serp_title_and_snippet(
-    title: str,
-    snippet: str,
-    url: str,
-    platform: str = "linkedin",
-) -> Optional[Dict[str, str]]:
-    """Extracts canonical profile URL, person name, job title, and company from search engine result."""
-    if not url:
-        return None
-
-    plat = (platform or "linkedin").lower().strip()
-    canonical_url = ""
-
-    if plat == "linkedin":
-        m_li = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/([a-zA-Z0-9\-_%]+)", url)
-        if not m_li:
-            return None
-        slug = m_li.group(1).split("?")[0].strip("/")
-        if not slug or slug.lower() in ("dir", "jobs", "company", "pulse", "posts"):
-            return None
-        canonical_url = f"https://www.linkedin.com/in/{slug}"
-    elif plat == "github":
-        m_gh = re.search(r"https?://github\.com/([a-zA-Z0-9\-_]+)", url)
-        if not m_gh:
-            return None
-        slug = m_gh.group(1).split("?")[0].strip("/")
-        if not slug or slug.lower() in ("orgs", "topics", "search", "features", "marketplace", "trending", "settings", "login", "about"):
-            return None
-        canonical_url = f"https://github.com/{slug}"
-    elif plat in ("twitter", "x"):
-        m_tw = re.search(r"https?://(?:twitter|x)\.com/([a-zA-Z0-9_]+)", url)
-        if not m_tw:
-            return None
-        slug = m_tw.group(1).split("?")[0].strip("/")
-        if not slug or slug.lower() in ("home", "explore", "search", "intent", "hashtag", "settings", "i"):
-            return None
-        canonical_url = f"https://x.com/{slug}"
-    else:
-        canonical_url = url.split("?")[0]
-
-    # Clean SERP title by stripping platform branding suffix (supports -, –, —, /, ·, •, |, and Twitter/X branding)
-    clean_title = re.sub(
-        r"(?:\s+[-–—/·•]\s*|\s*[|·•]\s*|\s+on\s+)(?:\b(?:LinkedIn|GitHub|Twitter|X|Platform)\b).*$",
-        "",
-        title or "",
-        flags=re.IGNORECASE,
-    ).strip()
-
-    # Split title using surrounded delimiters (requiring whitespace around hyphens/slashes to preserve names like Al-Mansoor or Apex A/S)
-    segments = [s.strip() for s in re.split(r"\s+[-–—/]\s+|\s*[|·•]\s*", clean_title) if s.strip()]
-
-    name, role, company = "", "", ""
-    if len(segments) >= 3:
-        name = segments[0]
-        role = segments[1]
-        company = segments[2]
-    elif len(segments) == 2:
-        name = segments[0]
-        role = segments[1]
-    elif len(segments) == 1:
-        name = segments[0]
-    else:
-        name = clean_title
-
-    # Extract embedded "at <Company>" if role contains it
-    if " at " in role.lower():
-        r_parts = re.split(r"\s+at\s+", role, flags=re.IGNORECASE, maxsplit=1)
-        if len(r_parts) == 2:
-            role = r_parts[0].strip()
-            if not company or any(c in company.lower() for c in ["united arab", "dubai", "india", "saudi", "singapore", "qatar"]):
-                company = r_parts[1].strip()
-
-    # Extract embedded "at <Company>" from name if role is empty
-    if not role and " at " in name.lower():
-        n_parts = re.split(r"\s+at\s+", name, flags=re.IGNORECASE, maxsplit=1)
-        if len(n_parts) == 2:
-            name = n_parts[0].strip()
-            if not company:
-                company = n_parts[1].strip()
-
-    name = re.sub(r"\s*\([^)]*\)", "", name).strip()
-    name = re.sub(r"^(?:Profile\s*:\s*|View\s+)", "", name, flags=re.IGNORECASE).strip()
-
-    # Fallback to snippet inspection if role or company missing
-    if snippet and (not role or not company):
-        for d_title in DEFAULT_DECISION_MAKER_TITLES:
-            if not role and d_title.lower() in snippet.lower():
-                role = d_title
-            m_snip = re.search(
-                re.escape(d_title) + r"\s+at\s+([A-Za-z0-9\s.,&'\-]+?)(?:\.|\,|\;|\bExperience|\bLocation|\bEducation|\bView|$)",
-                snippet,
-                flags=re.IGNORECASE,
-            )
-            if m_snip:
-                if not role:
-                    role = d_title
-                if not company:
-                    company = m_snip.group(1).strip()
-                break
-
-    if not name or len(name) < 2:
-        return None
-
-    return {
-        "name": name[:90],
-        "title": role[:90],
-        "company": company[:90],
-        "profile_url": canonical_url,
-        "platform": plat,
-        "snippet": (snippet or "")[:250],
-    }
 
 
 class XRaySearchMixin:
@@ -231,8 +106,11 @@ class XRaySearchMixin:
         keywords: Optional[List[str]] = None,
         exclusions: Optional[List[str]] = None,
     ) -> List[Dict[str, str]]:
-        """Executes targeted X-ray search across DuckDuckGo HTML and Bing without bot blocks."""
-        query = build_xray_query(
+        """Executes live X-ray search across DDG, Bing, and Google with genuine zero-mock handling."""
+        self.last_xray_engine = ""
+        self.last_xray_status = "no_results"
+
+        strict_q = build_xray_query(
             company_name=company_name,
             job_titles=job_titles,
             country=country,
@@ -241,78 +119,98 @@ class XRaySearchMixin:
             exclusions=exclusions,
         )
 
-        results: List[Dict[str, str]] = []
-        seen_urls = set()
-
-        search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
-        if hasattr(self, "log"):
-            self.log("HTTP", f"Executing RecruitIn X-ray search for '{company_name}': {query}", url=search_url)
-
         fetch_func = getattr(self, "fetch_page", None)
         if not fetch_func:
-            return results
+            self.last_xray_engine = "fallback"
+            self.last_xray_status = "rate_limited_or_offline"
+            return []
 
-        html, status, latency = fetch_func(search_url, timeout=7.0, polite_jitter=True)
-        if html and status in (200, 202):
-            soup = BeautifulSoup(html, "lxml")
-            for result_div in soup.find_all("div", class_=re.compile(r"result\b")):
-                a_tag = result_div.find("a", class_="result__url") or result_div.find("a", class_="result__snippet") or result_div.find("a", href=True)
-                title_tag = result_div.find("a", class_="result__title") or result_div.find("h2") or a_tag
-                snippet_tag = result_div.find("a", class_="result__snippet") or result_div.find("div", class_="result__snippet")
+        results: List[Dict[str, str]] = []
+        winning_engine = ""
+        engine_states: Dict[str, tuple] = {}
+        any_blocked = False
 
-                if not a_tag or not a_tag.get("href"):
-                    continue
+        strict_plan = [
+            ("duckduckgo", strict_q, 3.5),
+            ("bing", build_bing_xray_query(strict_q), 5.0),
+            ("google", strict_q, 5.0),
+        ]
 
-                raw_href = a_tag["href"]
-                if "uddg=" in raw_href:
-                    m = re.search(r"uddg=([^&]+)", raw_href)
-                    if m:
-                        raw_href = urllib.parse.unquote(m.group(1))
-
-                title_text = title_tag.get_text(" ", strip=True) if title_tag else ""
-                snip_text = snippet_tag.get_text(" ", strip=True) if snippet_tag else ""
-
-                parsed = parse_xray_serp_title_and_snippet(title_text, snip_text, raw_href, platform=platform)
-                if parsed and parsed["profile_url"] not in seen_urls:
-                    seen_urls.add(parsed["profile_url"])
-                    results.append(parsed)
-                    if len(results) >= max_results:
-                        break
-
-        # Bing fallback if DDG returned 0 profiles
-        if not results:
-            bing_url = f"https://www.bing.com/search?q={urllib.parse.quote_plus(query)}"
+        for prov, q_str, tout in strict_plan:
             if hasattr(self, "log"):
-                self.log("HTTP", f"DuckDuckGo X-ray returned 0 results; executing Bing fallback", url=bing_url)
+                self.log("HTTP", f"Executing {prov} RecruitIn X-ray search for '{company_name}': {q_str}")
+            hits, blocked, status = query_xray_provider(
+                fetch_func,
+                provider=prov,
+                query=q_str,
+                platform=platform,
+                max_results=max_results,
+                timeout=tout,
+                polite_jitter=False,
+            )
+            engine_states[prov] = (blocked, status)
+            if blocked:
+                any_blocked = True
+            if hits:
+                results = hits[:max_results]
+                winning_engine = prov
+                break
 
-            b_html, b_status, b_lat = fetch_func(bing_url, timeout=7.0, polite_jitter=True)
-            if b_html and b_status == 200:
-                b_soup = BeautifulSoup(b_html, "lxml")
-                for li in b_soup.select("li.b_algo"):
-                    a_el = li.select_one("h2 a")
-                    if not a_el:
-                        continue
-                    raw_href = a_el.get("href", "")
-                    target_url = raw_href
-                    m = re.search(r"[?&]u=([^&]+)", raw_href)
-                    if m:
-                        dec = decode_bing_u(m.group(1))
-                        if dec.startswith("http"):
-                            target_url = dec
+        # Relaxed fallback queries ONLY on engines that returned clean 200 without rate-limiting
+        clean_co = str(company_name or "").strip()
+        if not results and clean_co:
+            relaxed_candidates: List[tuple] = []
+            bing_blocked, bing_status = engine_states.get("bing", (True, 0))
+            if not bing_blocked and bing_status in (200, 202):
+                r_bing = build_relaxed_xray_query(clean_co, country=country, platform=platform)
+                m_bing = build_relaxed_xray_query(clean_co, country=country, platform=platform, minimal=True)
+                relaxed_candidates.append(("bing", r_bing, 5.0))
+                if m_bing != r_bing:
+                    relaxed_candidates.append(("bing", m_bing, 5.0))
 
-                    b_title = a_el.get_text(" ", strip=True)
-                    snip_el = li.select_one(".b_caption p, .b_snippet")
-                    b_snip = snip_el.get_text(" ", strip=True) if snip_el else ""
+            google_blocked, google_status = engine_states.get("google", (True, 0))
+            if not google_blocked and google_status in (200, 202):
+                r_google = build_relaxed_xray_query(clean_co, country=country, platform=platform)
+                if (platform or "linkedin").lower().strip() == "linkedin":
+                    r_google = r_google.replace("site:linkedin.com/in ", "site:linkedin.com/in/ ", 1)
+                relaxed_candidates.append(("google", r_google, 5.0))
 
-                    parsed = parse_xray_serp_title_and_snippet(b_title, b_snip, target_url, platform=platform)
-                    if parsed and parsed["profile_url"] not in seen_urls:
-                        seen_urls.add(parsed["profile_url"])
-                        results.append(parsed)
-                        if len(results) >= max_results:
-                            break
+            bing_hit_block = False
+            for prov, r_query, tout in relaxed_candidates:
+                if prov == "bing" and bing_hit_block:
+                    continue
+                if hasattr(self, "log"):
+                    self.log("HTTP", f"Executing relaxed {prov} X-ray query for '{clean_co}': {r_query}")
+                hits, blocked, _status = query_xray_provider(
+                    fetch_func,
+                    provider=prov,
+                    query=r_query,
+                    platform=platform,
+                    max_results=max_results,
+                    timeout=tout,
+                    polite_jitter=False,
+                )
+                if blocked:
+                    any_blocked = True
+                    if prov == "bing":
+                        bing_hit_block = True
+                if hits:
+                    results = hits[:max_results]
+                    winning_engine = prov
+                    break
+
+        if results:
+            self.last_xray_engine = winning_engine
+            self.last_xray_status = "live_results"
+        else:
+            self.last_xray_engine = "fallback"
+            self.last_xray_status = "rate_limited_or_offline" if any_blocked else "no_results"
 
         if hasattr(self, "log"):
-            self.log("PARSE", f"Discovered {len(results)} X-ray persona profiles for '{company_name}'", url=search_url)
+            self.log(
+                "PARSE",
+                f"Discovered {len(results)} X-ray persona profiles for '{company_name}' (engine={self.last_xray_engine}, status={self.last_xray_status})",
+            )
 
         return results
 
@@ -326,7 +224,6 @@ class XRaySearchMixin:
         co_name = (enriched.get("company_name") or "").strip()
         country = (target_country or "").strip() or (enriched.get("country") or "").strip()
 
-        # 1 & 2: Primary & Secondary Emails
         raw_emails = enriched.get("emails")
         if isinstance(raw_emails, list):
             email_list = [str(e).strip() for e in raw_emails if e and "@" in str(e)]
@@ -337,7 +234,6 @@ class XRaySearchMixin:
         enriched["primary_email"] = (enriched.get("primary_email") or "").strip() or (email_list[0] if email_list else "")
         enriched["secondary_email"] = (enriched.get("secondary_email") or "").strip() or (email_list[1] if len(email_list) > 1 else "")
 
-        # 3: Direct Phone
         raw_phones = enriched.get("phones")
         if isinstance(raw_phones, list):
             phone_list = [str(p).strip() for p in raw_phones if p and str(p).strip()]
@@ -347,7 +243,6 @@ class XRaySearchMixin:
             phone_list = []
         enriched["direct_phone"] = (enriched.get("direct_phone") or "").strip() or (phone_list[0] if phone_list else "")
 
-        # 4: WhatsApp Outreach Link
         existing_wa = (enriched.get("whatsapp_url") or enriched.get("whatsapp_outreach_url") or "").strip()
         if existing_wa:
             enriched["whatsapp_url"] = existing_wa
@@ -369,13 +264,12 @@ class XRaySearchMixin:
                 enriched["whatsapp_url"] = ""
                 enriched["whatsapp_outreach_url"] = ""
 
-        # 5: LinkedIn Persona Profile URL (Primary: X-ray discovery, Fallback: 1-click search link)
         existing_li = (enriched.get("linkedin_persona_url") or enriched.get("linkedin_search_url") or "").strip()
         if "/in/" in existing_li:
             enriched["linkedin_persona_url"] = existing_li
             enriched["linkedin_search_url"] = existing_li
         else:
-            profiles = []
+            profiles: List[Dict[str, str]] = []
             if co_name:
                 try:
                     profiles = self.search_xray_profiles(company_name=co_name, country=country, platform="linkedin", max_results=2)
@@ -392,24 +286,21 @@ class XRaySearchMixin:
                     title_part = f" ({best['title']})" if best.get("title") else ""
                     enriched["contact_person"] = f"{best['name']}{title_part}"
             else:
-                clean_co_search = re.sub(r"\b(?:LLC|W\.L\.L\.|Ltd|SARL|Est\.|Inc\.|FZE|Pte)\b", "", co_name, flags=re.IGNORECASE).strip()
+                clean_co_search = clean_company_for_xray(co_name) or co_name
                 target_term = f"{clean_co_search} Purchase Manager".strip()
                 fallback_search = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(target_term)}"
                 enriched["linkedin_persona_url"] = fallback_search
                 enriched["linkedin_search_url"] = fallback_search
 
-        # 6: Corporate Contact Page URL
         corp_url = (enriched.get("corporate_contact_page_url") or "").strip()
+        if corp_url and not _normalize_website_base(corp_url):
+            corp_url = ""
         website = (enriched.get("website") or "").strip()
         if not corp_url and website:
-            clean_site = website.rstrip("/")
-            corp_url = f"{clean_site}/contact"
+            base_w = _normalize_website_base(website)
+            corp_url = f"{base_w}/contact" if base_w else ""
         enriched["corporate_contact_page_url"] = corp_url
-
-        # 7: Address
         enriched["address"] = (enriched.get("address") or "").strip()
-
-        # Contact person string hygiene
         enriched["contact_person"] = (enriched.get("contact_person") or "").strip()
 
         return enriched

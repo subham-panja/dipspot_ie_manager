@@ -3,6 +3,7 @@ from flask import Flask
 from flask_cors import CORS
 from app.config import Config
 from app.models import db
+from app.models_contacts import ensure_sqlite_lead_columns
 from app.db import init_db
 from app.routes.api import api_bp
 from app.routes.views import views_bp
@@ -49,6 +50,7 @@ def create_app(testing: bool = False) -> Flask:
     # Auto-create tables & seed MongoDB
     with app.app_context():
         db.create_all()
+        ensure_sqlite_lead_columns(db)
         try:
             init_db()
         except Exception as e:

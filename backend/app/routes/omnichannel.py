@@ -7,13 +7,13 @@ drafting, and automated follow-up cadence pause on reply.
 """
 
 import uuid
-import re
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
+from app.campaign_enrollment_service import canonical_campaign_lead_id, lead_id_candidates
 from app.db import get_db, now_iso
-from app.smtp_stopper import SmtpQuotaManager
 from app.followup_engine import FollowUpEngine
+from app.omnichannel_ai import classify_inbound_intent, generate_ai_smart_draft  # noqa: F401
+from app.routes.api_helpers import find_mongo_lead
+from app.smtp_stopper import SmtpQuotaManager
 
 omnichannel_bp = Blueprint("omnichannel", __name__, url_prefix="/api/omnichannel")
 
@@ -27,128 +27,17 @@ def serialize_doc(doc):
     return d
 
 
-def classify_inbound_intent(text: str) -> Dict[str, any]:
-    """AI Intent & Sentiment Classifier for inbound commercial inquiries."""
-    text_low = text.lower()
-    
-    # 1. Unsubscribe / Negative (Safety & Opt-Out Priority)
-    if any(k in text_low for k in ["stop", "unsubscribe", "not interested", "remove", "do not contact", "cancel"]):
-        return {
-            "intent": "Unsubscribe / Opt-Out",
-            "sentiment": "Negative",
-            "urgency": "Immediate",
-            "badge_color": "rose",
-            "suggested_action": "Blacklist from Outreach Cadences",
-        }
-
-    # 2. Price Objection / Negotiation (Evaluate before general commodity/MT keywords)
-    if any(k in text_low for k in ["too high", "expensive", "discount", "cheaper", "better price", "competitor", "counter"]):
-        return {
-            "intent": "Price Negotiation / Counter-Offer",
-            "sentiment": "Neutral",
-            "urgency": "High",
-            "badge_color": "amber",
-            "suggested_action": "Offer Volume Discount for 5+ Containers",
-        }
-
-    # 3. High Purchase Intent / RFQ
-    if any(k in text_low for k in ["quote", "price", "cif", "fob", "mt", "container", "interested", "specification", "coi", "payment term"]):
-        return {
-            "intent": "High Commercial Intent (RFQ)",
-            "sentiment": "Positive",
-            "urgency": "High",
-            "badge_color": "emerald",
-            "suggested_action": "Issue Formal Proforma Invoice / Soft Offer",
-        }
-    
-    # 4. Out of office / generic
-    if any(k in text_low for k in ["out of office", "auto reply", "away until", "vacation"]):
-        return {
-            "intent": "Out of Office / Auto-Reply",
-            "sentiment": "Neutral",
-            "urgency": "Low",
-            "badge_color": "slate",
-            "suggested_action": "Snooze Sequence for 5 Days",
-        }
-    
-    return {
-        "intent": "General Inquiry",
-        "sentiment": "Neutral",
-        "urgency": "Medium",
-        "badge_color": "cyan",
-        "suggested_action": "Send Company Catalog & Product Specs",
-    }
-
-
-def generate_ai_smart_draft(customer: dict, last_message: str = "", intent_info: Optional[dict] = None, channel: str = "Email") -> str:
-    """Generates an AI True-Native contextual commercial counter-offer."""
-    company = customer.get("company_name") or customer.get("lead_name") or "Valued Partner"
-    contact = customer.get("contact_person") or "Purchasing Director"
-    country = customer.get("country") or customer.get("lead_country") or "your market"
-    commodity = customer.get("matched_varieties") or "Export Grade Rice"
-    port = customer.get("nearest_port") or f"your nearest container port"
-
-    if intent_info is None:
-        intent_info = classify_inbound_intent(last_message) if last_message else {"intent": customer.get("latest_intent", "")}
-
-    intent = intent_info.get("intent", "")
-
-    if channel.lower() == "whatsapp":
-        if "RFQ" in intent or "Commercial Intent" in intent or "quote" in last_message.lower():
-            return (
-                f"Hi {contact}, thank you for reaching out to TradePulse EXIM regarding {company}. "
-                f"We can quote spot CIF {port} for prompt shipment of {commodity} (SGS inspected). "
-                f"Would you prefer 25kg or 50kg bags, and what is your target monthly tonnage?"
-            )
-        elif "Negotiation" in intent:
-            return (
-                f"Hello {contact}, regarding pricing for {company}: We can offer a $12/MT rebate for a 5-container booking to {port}. "
-                f"Shall we issue a formal revised SCO today?"
-            )
-        else:
-            return f"Hello {contact}, following up regarding {company}'s import requirements for {commodity} to {port}. Let us know your delivery timeline."
-
-    if "RFQ" in intent or "Commercial Intent" in intent:
-        return (
-            f"Dear {contact},\n\n"
-            f"Thank you for your prompt response regarding {commodity} for {company}. "
-            f"We are pleased to quote our current spot benchmark for immediate shipment to {port}:\n\n"
-            f"• Commodity: {commodity} (Inspection by SGS / Bureau Veritas at loading)\n"
-            f"• Packing: 50 kg PP bags (Custom buyer branding available)\n"
-            f"• Minimum Order: 2 x 20ft FCL (52 MT)\n"
-            f"• Payment Terms: 100% Irrevocable Confirmed L/C at Sight or 20% Advance / 80% BL copy\n\n"
-            f"Would you prefer this quotation structured on FOB Indian Port or CIF {port} basis?"
-        )
-    elif "Negotiation" in intent:
-        return (
-            f"Dear {contact},\n\n"
-            f"We understand your price sensitivity for {company}'s market in {country}. "
-            f"To establish a long-term trade relationship for {commodity}, we can adjust our rate by $12/MT "
-            f"provided we can contract a minimum 5-container trial allocation (130 MT) for shipment this month.\n\n"
-            f"Please let us know if we should issue a formal revised SCO under these terms."
-        )
-    else:
-        return (
-            f"Dear {contact},\n\n"
-            f"Thank you for contacting our commercial export desk regarding {company}. "
-            f"We specialize in containerized shipments of {commodity} directly to {port}.\n\n"
-            f"Please let us know your required delivery schedule and volume so we can reserve your milling allocation."
-        )
-
-
 @omnichannel_bp.route("/threads", methods=["GET"])
 def get_threads():
     """Lists all customer communication threads with AI sentiment, unread counts, and channel tags."""
     db = get_db()
-    
-    # Ensure some initial demo conversations exist if database is fresh
+
     if db.omnichannel_messages.count_documents({}) == 0:
         leads_sample = list(db.leads.find({"website": {"$ne": ""}}).limit(6))
         for idx, l in enumerate(leads_sample):
             c_name = l.get("company_name", "Global Trade Corp")
-            lead_id = l.get("id", idx + 1)
-            
-            # Initial outbound email
+            lead_id = canonical_campaign_lead_id(l) or (idx + 1)
+
             db.omnichannel_messages.insert_one({
                 "message_id": f"MSG-INIT-{uuid.uuid4().hex[:6].upper()}",
                 "lead_id": lead_id,
@@ -161,7 +50,6 @@ def get_threads():
                 "timestamp": now_iso(),
             })
 
-            # Inbound reply for 3 of them
             if idx % 2 == 0:
                 inbound_text = (
                     f"Hi TradePulse Team, this is Tariq from {c_name}. Please send CIF quotation for 10 containers of 5% broken parboiled rice to our discharge port."
@@ -184,7 +72,6 @@ def get_threads():
                     "timestamp": now_iso(),
                 })
 
-    # Group messages by lead_id
     pipeline = [
         {"$sort": {"timestamp": -1}},
         {
@@ -201,21 +88,21 @@ def get_threads():
                 "total_messages": {"$sum": 1},
             }
         },
-        {"$sort": {"latest_timestamp": -1}}
+        {"$sort": {"latest_timestamp": -1}},
     ]
     raw_threads = list(db.omnichannel_messages.aggregate(pipeline))
-    
+
     threads = []
     for t in raw_threads:
         lead_id = t["_id"]
-        lead = db.leads.find_one({"id": lead_id}) or {}
+        lead = find_mongo_lead(db, lead_id) or {}
         threads.append({
             "lead_id": lead_id,
             "company_name": t.get("company_name") or lead.get("company_name", "Global Trade Entity"),
             "country": lead.get("country", ""),
             "contact_person": lead.get("contact_person", "Procurement Desk"),
-            "email": lead.get("emails", "").split(";")[0].strip(),
-            "phone": lead.get("phones", "").split(";")[0].strip(),
+            "email": (lead.get("emails") or "").split(";")[0].strip(),
+            "phone": (lead.get("phones") or "").split(";")[0].strip(),
             "deal_status": lead.get("deal_status", "unassigned"),
             "latest_message": t.get("latest_message", ""),
             "latest_channel": t.get("latest_channel", "Email"),
@@ -230,18 +117,17 @@ def get_threads():
     return jsonify({"threads": threads, "total": len(threads)})
 
 
-@omnichannel_bp.route("/threads/<int:lead_id>", methods=["GET"])
-def get_thread_detail(lead_id: int):
+@omnichannel_bp.route("/threads/<lead_id>", methods=["GET"])
+def get_thread_detail(lead_id: str):
     """Retrieves full chronological message history (both Gmail and WhatsApp) for a lead."""
     db = get_db()
-    lead = db.leads.find_one({"id": lead_id})
+    lead = find_mongo_lead(db, lead_id)
     if not lead:
         return jsonify({"error": "Lead not found"}), 404
 
-    messages = list(db.omnichannel_messages.find({"lead_id": lead_id}).sort("timestamp", 1))
-    
-    # Check if this lead has an active follow-up cadence
-    cadence_enr = db.cadence_enrollments.find_one({"lead_id": lead_id})
+    cands = lead_id_candidates(lead)
+    messages = list(db.omnichannel_messages.find({"lead_id": {"$in": cands}}).sort("timestamp", 1))
+    cadence_enr = db.cadence_enrollments.find_one({"lead_id": {"$in": cands}})
 
     return jsonify({
         "lead": serialize_doc(lead),
@@ -250,11 +136,12 @@ def get_thread_detail(lead_id: int):
     })
 
 
-@omnichannel_bp.route("/threads/<int:lead_id>/reply", methods=["POST"])
-def send_reply(lead_id: int):
+@omnichannel_bp.route("/threads/<lead_id>/reply", methods=["POST"])
+@omnichannel_bp.route("/threads/<lead_id>/dispatch", methods=["POST"])
+def send_reply(lead_id: str):
     """Sends a reply via chosen channel (Gmail Email or WhatsApp) and appends to thread."""
     db = get_db()
-    lead = db.leads.find_one({"id": lead_id})
+    lead = find_mongo_lead(db, lead_id)
     if not lead:
         return jsonify({"error": "Lead not found"}), 404
 
@@ -262,6 +149,7 @@ def send_reply(lead_id: int):
     channel = data.get("channel", "Email")
     content = (data.get("content") or "").strip()
     subject = (data.get("subject") or f"Re: Commercial Inquiry - {lead.get('company_name')}").strip()
+    contact_id = str(data.get("contact_id") or "").strip()
 
     if not content:
         return jsonify({"error": "Message content is required"}), 400
@@ -269,7 +157,6 @@ def send_reply(lead_id: int):
     dispatch_id = f"RPL-{channel[:2].upper()}-{uuid.uuid4().hex[:6].upper()}"
 
     if channel == "Email":
-        # Check Gmail SMTP Quota Stopper
         can_send, reason = SmtpQuotaManager.check_can_send()
         if not can_send:
             return jsonify({
@@ -279,17 +166,16 @@ def send_reply(lead_id: int):
                 "status": SmtpQuotaManager.get_status(),
             }), 429
 
-        # Record authorized send
         SmtpQuotaManager.record_send(1)
         status_label = "Delivered via Gmail SMTP"
     else:
-        # WhatsApp Personal / Cloud Gateway
         status_label = "Delivered via WhatsApp Direct Session"
 
-    # Append to omnichannel messages
+    canon_lid = canonical_campaign_lead_id(lead)
     msg_doc = {
         "message_id": dispatch_id,
-        "lead_id": lead_id,
+        "lead_id": canon_lid,
+        "contact_id": contact_id,
         "company_name": lead.get("company_name", ""),
         "channel": channel,
         "direction": "outbound",
@@ -309,26 +195,25 @@ def send_reply(lead_id: int):
     })
 
 
-@omnichannel_bp.route("/threads/<int:lead_id>/ai-draft", methods=["POST"])
-def get_ai_draft(lead_id: int):
+@omnichannel_bp.route("/threads/<lead_id>/ai-draft", methods=["POST"])
+def get_ai_draft(lead_id: str):
     """Generates an AI True-Native contextual response draft based on customer profile & last inbound message."""
     db = get_db()
-    lead = db.leads.find_one({"id": lead_id})
+    lead = find_mongo_lead(db, lead_id)
     if not lead:
         return jsonify({"error": "Lead not found"}), 404
 
-    # Find the latest inbound message
+    cands = lead_id_candidates(lead)
     last_inbound = db.omnichannel_messages.find_one(
-        {"lead_id": lead_id, "direction": "inbound"},
-        sort=[("timestamp", -1)]
+        {"lead_id": {"$in": cands}, "direction": "inbound"},
+        sort=[("timestamp", -1)],
     )
     last_text = last_inbound.get("content", "") if last_inbound else "Hello, please provide pricing."
     intent_info = classify_inbound_intent(last_text)
-    
     draft = generate_ai_smart_draft(lead, last_text, intent_info)
-    
+
     return jsonify({
-        "lead_id": lead_id,
+        "lead_id": canonical_campaign_lead_id(lead),
         "company_name": lead.get("company_name"),
         "ai_intent": intent_info,
         "draft_subject": f"SCO Spot Quotation: {lead.get('matched_varieties', 'Commodity')} CIF {lead.get('nearest_port', 'Port')}",
@@ -354,16 +239,18 @@ def receive_inbound_message():
     if not lead_id or not content:
         return jsonify({"error": "lead_id and content are required"}), 400
 
-    lead = db.leads.find_one({"id": int(lead_id)})
+    lead = find_mongo_lead(db, lead_id)
     if not lead:
         return jsonify({"error": "Lead not found"}), 404
 
+    canon_lid = canonical_campaign_lead_id(lead)
     intent_info = classify_inbound_intent(content)
     msg_id = f"IN-{channel[:2].upper()}-{uuid.uuid4().hex[:6].upper()}"
 
     doc = {
         "message_id": msg_id,
-        "lead_id": int(lead_id),
+        "lead_id": canon_lid,
+        "contact_id": str(data.get("contact_id") or "").strip(),
         "company_name": lead.get("company_name", ""),
         "channel": channel,
         "direction": "inbound",
@@ -377,12 +264,10 @@ def receive_inbound_message():
     }
     db.omnichannel_messages.insert_one(doc)
 
-    # Auto-pause automated cadences
-    FollowUpEngine.pause_on_client_reply(int(lead_id), channel, content)
+    FollowUpEngine.pause_on_client_reply(canon_lid, channel, content)
 
-    # Update lead status to In Negotiation if positive intent
     if "Intent" in intent_info["intent"]:
-        db.leads.update_one({"id": int(lead_id)}, {"$set": {"deal_status": "negotiation", "updated_at": now_iso()}})
+        db.leads.update_one({"_id": lead["_id"]}, {"$set": {"deal_status": "negotiation", "updated_at": now_iso()}})
 
     return jsonify({
         "success": True,
@@ -403,13 +288,13 @@ def get_whatsapp_status():
     wa_count = db.omnichannel_messages.count_documents({
         "channel": "WhatsApp",
         "direction": "outbound",
-        "timestamp": {"$regex": f"^{today_str}"}
+        "timestamp": {"$regex": f"^{today_str}"},
     })
 
     return jsonify({
         "gateway_mode": "Personal WhatsApp Web Session + Meta Cloud API Hybrid",
         "daily_messages_sent": wa_count,
-        "daily_safe_cap": 50,  # Recommended safety ceiling for personal number
+        "daily_safe_cap": 50,
         "anti_ban_protection": {
             "human_typing_delay_ms": "4500ms - 8200ms",
             "safe_daily_limit": 50,

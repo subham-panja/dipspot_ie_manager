@@ -10,6 +10,7 @@ interface DossierActionBarProps {
   onConvertToDeal?: (customer: CustomerLead) => void;
   onConvert?: (customer?: any) => void;
   accentBgClass: string;
+  isLight?: boolean;
 }
 
 export default function DossierActionBar({
@@ -18,14 +19,23 @@ export default function DossierActionBar({
   onConvertToDeal,
   onConvert,
   accentBgClass,
+  isLight = false,
 }: DossierActionBarProps) {
   return (
-    <div className="pt-3 border-t border-slate-800/60 flex items-center justify-end gap-2.5">
+    <div
+      className={`pt-3 border-t flex items-center justify-end gap-2.5 ${
+        isLight ? 'border-slate-200' : 'border-slate-800/60'
+      }`}
+    >
       {onEnroll && (
         <button
           type="button"
           onClick={() => onEnroll(lead)}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5"
+          className={`text-xs font-semibold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 border ${
+            isLight
+              ? 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-sm'
+              : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+          }`}
         >
           <Megaphone className="w-3.5 h-3.5 text-blue-400" />
           <span>Enroll Campaign</span>

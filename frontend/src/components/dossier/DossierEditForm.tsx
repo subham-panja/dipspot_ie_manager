@@ -11,6 +11,7 @@ interface DossierEditFormProps {
   onCancel: () => void;
   saving: boolean;
   accentBtnClass: string;
+  isLight?: boolean;
 }
 
 export default function DossierEditForm({
@@ -20,11 +21,21 @@ export default function DossierEditForm({
   onCancel,
   saving,
   accentBtnClass,
+  isLight = false,
 }: DossierEditFormProps) {
+  const inputClass = isLight
+    ? 'w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-purple-500'
+    : 'w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none focus:border-purple-500';
+  const labelClass = `block font-semibold mb-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`;
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+      <div
+        className={`flex items-center justify-between pb-3 border-b ${
+          isLight ? 'border-slate-200' : 'border-slate-800'
+        }`}
+      >
+        <h3 className={`text-sm font-bold flex items-center gap-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>
           <Edit2 className="w-4 h-4 text-purple-400" />
           <span>Edit Lead Specifications &amp; Metadata</span>
         </h3>
@@ -33,127 +44,151 @@ export default function DossierEditForm({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Company Legal Name</label>
+          <label className={labelClass}>Company Legal Name</label>
           <input
             type="text"
             value={editForm.company_name || ''}
             onChange={(e) => setEditForm({ ...editForm, company_name: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none focus:border-purple-500"
+            className={inputClass}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Country / Territory</label>
+          <label className={labelClass}>Country / Territory</label>
           <input
             type="text"
             value={editForm.country || ''}
             onChange={(e) => setEditForm({ ...editForm, country: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none focus:border-purple-500"
+            className={inputClass}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">City or Commercial Hub</label>
+          <label className={labelClass}>Origin State / Province</label>
+          <input
+            type="text"
+            value={editForm.origin_state || editForm.state || ''}
+            onChange={(e) => setEditForm({ ...editForm, origin_state: e.target.value, state: e.target.value })}
+            className={inputClass}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>City or Commercial Hub</label>
           <input
             type="text"
             value={editForm.city_or_hub || ''}
             onChange={(e) => setEditForm({ ...editForm, city_or_hub: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none focus:border-purple-500"
+            className={inputClass}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Contact Executive</label>
+          <label className={labelClass}>Port Hub (Nearest Sea Port)</label>
+          <input
+            type="text"
+            value={editForm.nearest_port || ''}
+            onChange={(e) => setEditForm({ ...editForm, nearest_port: e.target.value })}
+            className={inputClass}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>B2B Directory / Source</label>
+          <input
+            type="text"
+            value={editForm.b2b_directory || ''}
+            onChange={(e) => setEditForm({ ...editForm, b2b_directory: e.target.value })}
+            className={inputClass}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>Shipment Volume</label>
+          <input
+            type="text"
+            value={editForm.shipment_volume || ''}
+            onChange={(e) => setEditForm({ ...editForm, shipment_volume: e.target.value })}
+            placeholder="e.g. 5-10 Containers / mo"
+            className={`${inputClass} font-mono`}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>Annual Volume Estimate</label>
+          <input
+            type="text"
+            value={editForm.annual_volume_est || ''}
+            onChange={(e) => setEditForm({ ...editForm, annual_volume_est: e.target.value })}
+            placeholder="e.g. 2,400 MT / yr"
+            className={`${inputClass} font-mono`}
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>Contact Executive</label>
           <input
             type="text"
             value={editForm.contact_person || ''}
             onChange={(e) => setEditForm({ ...editForm, contact_person: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none focus:border-purple-500"
+            className={inputClass}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Telephone Numbers (Semi-colon separated)</label>
-          <input
-            type="text"
-            value={editForm.phones || ''}
-            onChange={(e) => setEditForm({ ...editForm, phones: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-white outline-none focus:border-purple-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-slate-400 font-semibold mb-1">Email Addresses (Semi-colon separated)</label>
-          <input
-            type="text"
-            value={editForm.emails || ''}
-            onChange={(e) => setEditForm({ ...editForm, emails: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-white outline-none focus:border-purple-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-slate-400 font-semibold mb-1">Corporate Website</label>
+          <label className={labelClass}>Corporate Website</label>
           <input
             type="text"
             value={editForm.website || ''}
             onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-white outline-none focus:border-purple-500"
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Direct Telephone</label>
+          <label className={labelClass}>Direct Telephone</label>
           <input
             type="text"
             value={editForm.direct_phone || ''}
             onChange={(e) => setEditForm({ ...editForm, direct_phone: e.target.value })}
             placeholder="+971 4 123 4567"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-emerald-400 outline-none focus:border-purple-500"
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Primary Email</label>
+          <label className={labelClass}>Primary Email</label>
           <input
             type="text"
             value={editForm.primary_email || ''}
             onChange={(e) => setEditForm({ ...editForm, primary_email: e.target.value })}
             placeholder="purchase@company.com"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-blue-400 outline-none focus:border-purple-500"
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Secondary / Inbox Email</label>
+          <label className={labelClass}>Telephone Numbers (Semi-colon separated)</label>
           <input
             type="text"
-            value={editForm.secondary_email || ''}
-            onChange={(e) => setEditForm({ ...editForm, secondary_email: e.target.value })}
-            placeholder="desk@company.com"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-purple-300 outline-none focus:border-purple-500"
+            value={editForm.phones || ''}
+            onChange={(e) => setEditForm({ ...editForm, phones: e.target.value })}
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">WhatsApp Outreach URL</label>
+          <label className={labelClass}>Email Addresses (Semi-colon separated)</label>
           <input
             type="text"
-            value={editForm.whatsapp_url || editForm.whatsapp_outreach_url || ''}
-            onChange={(e) =>
-              setEditForm({
-                ...editForm,
-                whatsapp_url: e.target.value,
-                whatsapp_outreach_url: e.target.value,
-              })
-            }
-            placeholder="https://wa.me/971501234567"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-emerald-400 outline-none focus:border-purple-500"
+            value={editForm.emails || ''}
+            onChange={(e) => setEditForm({ ...editForm, emails: e.target.value })}
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">LinkedIn Persona Profile URL</label>
+          <label className={labelClass}>LinkedIn Persona Profile URL</label>
           <input
             type="text"
             value={editForm.linkedin_profile_url || editForm.linkedin_persona_url || ''}
@@ -165,44 +200,16 @@ export default function DossierEditForm({
               })
             }
             placeholder="https://www.linkedin.com/in/director-profile"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-blue-400 outline-none focus:border-purple-500"
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Corporate Contact Desk Page URL</label>
-          <input
-            type="text"
-            value={editForm.contact_page_url || editForm.corporate_contact_page_url || ''}
-            onChange={(e) =>
-              setEditForm({
-                ...editForm,
-                contact_page_url: e.target.value,
-                corporate_contact_page_url: e.target.value,
-              })
-            }
-            placeholder="https://company.com/contact-us"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-purple-400 outline-none focus:border-purple-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-slate-400 font-semibold mb-1">GitHub Profile URL</label>
-          <input
-            type="text"
-            value={editForm.github_url || ''}
-            onChange={(e) => setEditForm({ ...editForm, github_url: e.target.value })}
-            placeholder="https://github.com/company"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-slate-300 outline-none focus:border-purple-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-slate-400 font-semibold mb-1">Entity Role</label>
+          <label className={labelClass}>Entity Role</label>
           <select
             value={editForm.lead_type || 'importer'}
             onChange={(e) => setEditForm({ ...editForm, lead_type: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none"
+            className={inputClass}
           >
             <option value="importer">Global Importer / Buyer</option>
             <option value="wb_mill">Commercial Supplier / Mill</option>
@@ -210,61 +217,77 @@ export default function DossierEditForm({
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Commodity Lines</label>
+          <label className={labelClass}>Commodity Lines</label>
           <input
             type="text"
             value={editForm.matched_varieties || ''}
             onChange={(e) => setEditForm({ ...editForm, matched_varieties: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none"
+            className={inputClass}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Applicable HS Codes</label>
+          <label className={labelClass}>Applicable HS Codes</label>
           <input
             type="text"
             value={editForm.hs_codes_applicable || ''}
             onChange={(e) => setEditForm({ ...editForm, hs_codes_applicable: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-white outline-none"
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Custom Campaign Label</label>
+          <label className={labelClass}>Custom Campaign Label</label>
           <input
             type="text"
             value={editForm.custom_label || ''}
             onChange={(e) => setEditForm({ ...editForm, custom_label: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-purple-300 outline-none"
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Tax ID / GSTIN / IEC</label>
+          <label className={labelClass}>Tax ID / GSTIN / IEC</label>
           <input
             type="text"
             value={editForm.gstin || ''}
             onChange={(e) => setEditForm({ ...editForm, gstin: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 font-mono text-emerald-400 outline-none"
+            className={`${inputClass} font-mono`}
           />
         </div>
 
         <div className="md:col-span-2">
-          <label className="block text-slate-400 font-semibold mb-1">Physical Facility / Port Address</label>
+          <label className={labelClass}>Physical Facility / Port Address</label>
           <input
             type="text"
             value={editForm.address || ''}
             onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none"
+            className={inputClass}
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <label className={labelClass}>Extraction / Trade Notes</label>
+          <textarea
+            rows={2}
+            value={editForm.extraction_notes || ''}
+            onChange={(e) => setEditForm({ ...editForm, extraction_notes: e.target.value })}
+            className={inputClass}
           />
         </div>
       </div>
 
-      <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
+      <div
+        className={`pt-4 border-t flex justify-end gap-3 ${
+          isLight ? 'border-slate-200' : 'border-slate-800'
+        }`}
+      >
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+          className={`px-4 py-2 rounded-xl text-xs font-semibold ${
+            isLight ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white'
+          }`}
         >
           Cancel
         </button>

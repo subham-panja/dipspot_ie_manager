@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, MapPin, Ship } from 'lucide-react';
 import { CustomerLead } from './dossierTypes';
 
@@ -18,6 +18,10 @@ export default function DossierMapSection({
   const [mapQuery, setMapQuery] = useState('');
   const [mapStyle, setMapStyle] = useState<'roadmap' | 'satellite'>('roadmap');
 
+  useEffect(() => {
+    setMapQuery('');
+  }, [lead.id]);
+
   const lat = lead.latitude || 25.2048;
   const lng = lead.longitude || 55.2708;
   const mapSearchTarget = mapQuery || `${lat},${lng}`;
@@ -25,8 +29,8 @@ export default function DossierMapSection({
 
   return (
     <div
-      className={`w-full md:w-1/2 p-4 border-b md:border-b-0 md:border-r flex flex-col space-y-3 ${
-        isLight ? 'bg-slate-50/50 border-slate-200' : 'bg-slate-950/60 border-slate-800'
+      className={`w-full p-4 border-b flex flex-col space-y-3 ${
+        isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-slate-950/60 border-slate-800'
       }`}
     >
       <div className="flex items-center gap-2">
@@ -57,7 +61,11 @@ export default function DossierMapSection({
         </button>
       </div>
 
-      <div className="flex-1 min-h-[280px] rounded-xl overflow-hidden border border-slate-800/80 relative shadow-inner">
+      <div
+        className={`h-[240px] min-h-[220px] rounded-xl overflow-hidden border relative shadow-inner ${
+          isLight ? 'border-slate-200' : 'border-slate-800/80'
+        }`}
+      >
         <iframe
           title="Customer Global Location Map"
           src={embedMapUrl}
@@ -69,7 +77,7 @@ export default function DossierMapSection({
         <div className="absolute top-2 left-2 z-10 bg-slate-950/90 backdrop-blur-md border border-slate-800/90 rounded-lg p-2 text-[10px] text-slate-300 shadow-lg pointer-events-none">
           <div className="flex items-center gap-1.5 font-bold text-white">
             <MapPin className="w-3 h-3 text-red-400 shrink-0" />
-            <span className="truncate max-w-[140px]">{lead.company_name}</span>
+            <span className="truncate max-w-[160px]">{lead.company_name}</span>
           </div>
           <div className="font-mono text-emerald-400 mt-0.5">
             {lat.toFixed(4)}° N, {lng.toFixed(4)}° E
@@ -78,7 +86,7 @@ export default function DossierMapSection({
       </div>
 
       <div
-        className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+        className={`p-3 rounded-xl border text-xs space-y-1 ${
           isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
         }`}
       >
@@ -93,7 +101,10 @@ export default function DossierMapSection({
           <span>{lead.nearest_port || 'Jebel Ali Port (AEJEA)'}</span>
         </div>
         <div className="text-[11px] text-slate-400">
-          Location: <strong className={isLight ? 'text-slate-700' : 'text-slate-200'}>{lead.city_or_hub || lead.district || lead.country}</strong>
+          Location:{' '}
+          <strong className={isLight ? 'text-slate-700' : 'text-slate-200'}>
+            {lead.city_or_hub || lead.district || lead.origin_state || lead.state || lead.country}
+          </strong>
         </div>
       </div>
     </div>

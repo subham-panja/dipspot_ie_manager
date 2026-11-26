@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export type ThemeMode = 'dark' | 'light';
 export type AccentColor = 'emerald' | 'blue' | 'violet' | 'amber' | 'rose';
-export type DetailViewMode = 'right_drawer' | 'modal' | 'left_drawer';
+export type DetailViewMode = 'right_drawer' | 'modal' | 'left_drawer' | 'full_page';
 export type SettingsTab = 'appearance' | 'smtp' | 'crawler' | 'pricing' | 'stages';
 
 interface ThemeContextType {
@@ -111,7 +111,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       if (savedAccent && ACCENT_MAP[savedAccent]) {
         setAccentState(savedAccent);
       }
-      if (savedMode && ['right_drawer', 'modal', 'left_drawer'].includes(savedMode)) {
+      if (savedMode && ['right_drawer', 'modal', 'left_drawer', 'full_page'].includes(savedMode)) {
         setDetailViewModeState(savedMode);
       }
     } catch {

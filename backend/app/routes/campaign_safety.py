@@ -81,15 +81,17 @@ def register_campaign_safety_routes(bp):
         lead_id = data.get("lead_id")
         cadence_id = data.get("cadence_id", "CAD-COMMERCIAL-OUTREACH")
         custom_params = data.get("custom_params", {})
+        contact_id = data.get("contact_id")
 
         if not lead_id:
             return jsonify({"error": "lead_id is required"}), 400
 
         try:
             enrollment = FollowUpEngine.enroll_lead(
-                lead_id=int(lead_id),
+                lead_id=lead_id,
                 cadence_id=cadence_id,
-                custom_params=custom_params
+                custom_params=custom_params,
+                contact_id=contact_id,
             )
             return jsonify({
                 "success": True,

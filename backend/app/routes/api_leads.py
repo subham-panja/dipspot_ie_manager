@@ -1,8 +1,10 @@
 """Lead CRUD endpoints."""
 
+import json
 import re
 import uuid
 from flask import jsonify, request
+from app.contacts_service import canonical_lead_id, get_contacts_count_map
 from app.db import get_db, now_iso
 from app.models import Lead, db
 from app.routes.api_helpers import (
@@ -253,28 +255,55 @@ def register_lead_routes(bp):
         fields = [
             "company_name", "country", "city_or_hub", "contact_person", "phones", "emails",
             "website", "address", "matched_varieties", "hs_codes_applicable", "inquiry_or_profile",
-            "source_url", "gstin", "pan", "fssai_or_sfda_status", "state", "district",
+            "source_url", "source_name", "source_category", "b2b_directory", "harvest_date",
+            "customs_manifest_data", "origin_state", "annual_volume_est", "extraction_notes",
+            "gstin", "pan", "fssai_or_sfda_status", "state", "district",
             "category_or_role", "nearest_port", "shipment_volume", "importer_tier",
             "custom_label", "twitter_url", "linkedin_company_url", "primary_email",
             "secondary_email", "direct_phone", "whatsapp_url", "whatsapp_outreach_url",
             "linkedin_persona_url", "linkedin_profile_url", "corporate_contact_page_url",
             "contact_page_url", "github_url"
         ]
+        raw_score = data.get("priority_score", 0)
+        try:
+            if isinstance(raw_score, bool):
+                raise ValueError("bool")
+            priority_score = int(raw_score) if raw_score is not None and raw_score != "" else 0
+        except (ValueError, TypeError):
+            return jsonify({"error": "priority_score must be an integer"}), 400
+
+        raw_sr = data.get("source_reliability")
+        try:
+            if isinstance(raw_sr, bool):
+                raise ValueError("bool")
+            source_reliability = int(raw_sr) if raw_sr is not None and raw_sr != "" else 96
+        except (ValueError, TypeError):
+            return jsonify({"error": "source_reliability must be an integer"}), 400
+
         doc = {
             "id": next_id,
-            "priority_score": int(data.get("priority_score", 0)),
+            "priority_score": priority_score,
+            "source_reliability": source_reliability,
             "lead_type": data.get("lead_type", "importer"),
             "deal_status": data.get("deal_status", "unassigned"),
             "created_at": now_iso(),
             "updated_at": now_iso()
         }
         for f in fields:
-            doc[f] = data.get(f, "").strip()
+            val = data.get(f, "")
+            doc[f] = val.strip() if isinstance(val, str) else val
+        for list_field in ("key_trade_lanes", "commodities_list"):
+            if list_field in data:
+                raw_val = data[list_field]
+                if isinstance(raw_val, list):
+                    doc[list_field] = [str(x).strip() for x in raw_val if str(x).strip()]
+                elif isinstance(raw_val, str):
+                    doc[list_field] = [x.strip() for x in re.split(r"[;,]", raw_val) if x.strip()]
 
         res = mongo_db.leads.insert_one(doc)
         doc["_id"] = res.inserted_id
         sync_lead_to_sqlite(doc, db, Lead)
-        return jsonify({"lead": serialize_mongo_lead(doc), "message": "Lead created successfully"}), 201
+        return jsonify({"lead": serialize_mongo_lead(doc, contacts_count=0), "message": "Lead created successfully"}), 201
 
     @bp.route("/leads/<lead_id>", methods=["GET"])
     def get_lead(lead_id):
@@ -286,14 +315,16 @@ def register_lead_routes(bp):
                 if lead_sq:
                     return jsonify({"lead": lead_sq.to_dict()})
             except Exception:
-                pass
+                db.session.rollback()
             return jsonify({"error": "Lead not found"}), 404
 
         include_deleted = request.args.get("include_deleted", "").lower() == "true"
         if doc.get("is_deleted") and not include_deleted:
             return jsonify({"error": "Lead not found"}), 404
 
-        return jsonify({"lead": serialize_mongo_lead(doc)})
+        counts_map = get_contacts_count_map(mongo_db, [doc])
+        cnt = counts_map.get(canonical_lead_id(doc), 0)
+        return jsonify({"lead": serialize_mongo_lead(doc, contacts_count=cnt)})
 
     @bp.route("/leads/<lead_id>", methods=["PUT", "PATCH"])
     def update_lead(lead_id):
@@ -312,8 +343,27 @@ def register_lead_routes(bp):
             "primary_email", "secondary_email", "direct_phone", "whatsapp_url",
             "whatsapp_outreach_url", "linkedin_persona_url", "linkedin_profile_url",
             "corporate_contact_page_url", "contact_page_url", "github_url",
+            "extraction_notes", "origin_state", "b2b_directory", "harvest_date",
+            "source_name", "source_url", "source_category", "source_reliability",
+            "customs_manifest_data", "commodities_list", "annual_volume_est", "key_trade_lanes",
         ]
         updates = {k: data[k] for k in allowed_fields if k in data}
+        if "source_reliability" in updates:
+            raw_sr = updates["source_reliability"]
+            try:
+                if isinstance(raw_sr, bool):
+                    raise ValueError("bool")
+                updates["source_reliability"] = int(raw_sr) if raw_sr is not None and raw_sr != "" else 96
+            except (ValueError, TypeError):
+                return jsonify({"error": "source_reliability must be an integer"}), 400
+        if "priority_score" in updates:
+            raw_ps = updates["priority_score"]
+            try:
+                if isinstance(raw_ps, bool):
+                    raise ValueError("bool")
+                updates["priority_score"] = int(raw_ps) if raw_ps is not None and raw_ps != "" else 0
+            except (ValueError, TypeError):
+                return jsonify({"error": "priority_score must be an integer"}), 400
         updates["updated_at"] = now_iso()
 
         mongo_db.leads.update_one({"_id": lead["_id"]}, {"$set": updates})
@@ -325,13 +375,16 @@ def register_lead_routes(bp):
                 sq_lead = db.session.get(Lead, sq_id)
                 if sq_lead:
                     for k, v in updates.items():
-                        if hasattr(sq_lead, k):
-                            setattr(sq_lead, k, v)
+                        if k != "updated_at" and hasattr(sq_lead, k):
+                            val = json.dumps(v) if k == "customs_manifest_data" and isinstance(v, (dict, list)) else v
+                            setattr(sq_lead, k, val)
                     db.session.commit()
         except Exception:
-            pass
+            db.session.rollback()
 
-        return jsonify({"lead": serialize_mongo_lead(updated), "message": "Lead updated successfully"})
+        counts_map = get_contacts_count_map(mongo_db, [updated])
+        cnt = counts_map.get(canonical_lead_id(updated), 0)
+        return jsonify({"lead": serialize_mongo_lead(updated, contacts_count=cnt), "message": "Lead updated successfully"})
 
     @bp.route("/leads/<lead_id>", methods=["DELETE"])
     def delete_lead(lead_id):
@@ -351,7 +404,7 @@ def register_lead_routes(bp):
                         db.session.delete(sq_lead)
                         db.session.commit()
             except Exception:
-                pass
+                db.session.rollback()
             return jsonify({"message": f"Lead {lead.get('company_name', lead_id)} permanently deleted"})
         else:
             mongo_db.leads.update_one(

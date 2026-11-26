@@ -109,7 +109,7 @@ export default function ModalAppearanceTab({
           Configure how the customer intelligence dossier (with Google Maps & contact intelligence) opens when clicking any company name.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-2.5">
           <button
             type="button"
             onClick={() => setDetailViewMode('right_drawer')}
@@ -167,6 +167,26 @@ export default function ModalAppearanceTab({
             </div>
             <p className="text-[10px] text-slate-400 mt-1">
               Slides out from the left navigation boundary.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDetailViewMode('full_page')}
+            className={`p-3.5 rounded-xl border text-left transition ${
+              detailViewMode === 'full_page'
+                ? `border-2 ${accentClasses.border} ${isLight ? 'bg-slate-50' : 'bg-slate-800/80 shadow-lg'}`
+                : isLight
+                ? 'border-slate-200 bg-white'
+                : 'border-slate-800 bg-slate-950/60'
+            }`}
+          >
+            <div className="flex items-center justify-between font-bold text-xs text-emerald-400">
+              <span>Full-Page Dossier</span>
+              {detailViewMode === 'full_page' && <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20">Active</span>}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Opens across the full viewport with top-left &amp; top-right Back navigation.
             </p>
           </button>
         </div>

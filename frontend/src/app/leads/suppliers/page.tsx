@@ -4,7 +4,8 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Shell from '@/components/Shell';
 import PageLeftNav from '@/components/PageLeftNav';
-import CustomerDossier from '@/components/CustomerDossier';
+import CustomerDossier, { CustomerLead } from '@/components/CustomerDossier';
+import DossierEnrollModal from '@/components/dossier/DossierEnrollModal';
 import { fetchJson } from '@/lib/api';
 import { useTheme } from '@/context/ThemeContext';
 import { Loader2, Filter, X } from 'lucide-react';
@@ -37,6 +38,8 @@ function VerifiedSuppliersContent() {
   const [minScore, setMinScore] = useState<number | ''>('');
   const [selectedCustomer, setSelectedCustomer] = useState<LeadItem | null>(null);
   const [convertCustomer, setConvertCustomer] = useState<LeadItem | null>(null);
+  const [enrollCustomer, setEnrollCustomer] = useState<CustomerLead | null>(null);
+  const [enrollContactId, setEnrollContactId] = useState<string>('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   const {
@@ -224,7 +227,34 @@ function VerifiedSuppliersContent() {
 
       <LeadCreationModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onSubmit={handleCreateSupplier} leadType="wb_mill" isLight={isLight} />
       <ConvertToDealModal lead={convertCustomer} isOpen={!!convertCustomer} onClose={() => setConvertCustomer(null)} onSubmit={handleConvertContract} isLight={isLight} modalTitle="Enroll Supplier in Supply Contract" submitButtonText="Enroll Supplier" iconType="factory" accentClass="bg-emerald-600 hover:bg-emerald-500" />
-      <CustomerDossier customer={selectedCustomer} onClose={() => setSelectedCustomer(null)} />
+      <CustomerDossier
+        customer={selectedCustomer}
+        isEnrollModalOpen={!!enrollCustomer}
+        onClose={() => setSelectedCustomer(null)}
+        onConvertToDeal={(c) => {
+          setSelectedCustomer(null);
+          setConvertCustomer((c || selectedCustomer) as LeadItem);
+        }}
+        onEnroll={(c, contactId) => {
+          setEnrollCustomer(c);
+          setEnrollContactId(contactId || '');
+        }}
+        onUpdated={(updated) => {
+          setSelectedCustomer(updated as LeadItem);
+          setSuppliers((prev) => prev.map((item) => (item.id === updated.id ? (updated as LeadItem) : item)));
+        }}
+      />
+      <DossierEnrollModal
+        isOpen={!!enrollCustomer}
+        lead={enrollCustomer}
+        initialContactId={enrollContactId}
+        onClose={() => {
+          setEnrollCustomer(null);
+          setEnrollContactId('');
+        }}
+        isLight={isLight}
+        accentBgClass="bg-emerald-600 hover:bg-emerald-500"
+      />
     </Shell>
   );
 }

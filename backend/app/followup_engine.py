@@ -12,8 +12,11 @@ Features:
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+from app.campaign_enrollment_service import canonical_campaign_lead_id, lead_id_candidates
+from app.contacts_service import find_mongo_contact
 from app.db import get_db, now_iso
+from app.routes.api_helpers import find_mongo_lead
 from app.smtp_stopper import SmtpQuotaManager
 
 logger = logging.getLogger(__name__)
@@ -77,25 +80,48 @@ class FollowUpEngine:
         return list(db.followup_cadences.find({}))
 
     @classmethod
-    def enroll_lead(cls, lead_id: int, cadence_id: str, custom_params: Optional[Dict] = None) -> Dict[str, any]:
-        """Enrolls a lead into an automated follow-up sequence."""
+    def enroll_lead(
+        cls,
+        lead_id: Any,
+        cadence_id: str,
+        custom_params: Optional[Dict] = None,
+        contact_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Enrolls a lead (and optional contact) into an automated follow-up sequence."""
         db = get_db()
         cadence = db.followup_cadences.find_one({"cadence_id": cadence_id})
         if not cadence:
             raise ValueError(f"Cadence {cadence_id} not found")
 
-        lead = db.leads.find_one({"id": lead_id})
+        lead = find_mongo_lead(db, lead_id)
         if not lead:
             raise ValueError(f"Lead {lead_id} not found")
+
+        canon_lid = canonical_campaign_lead_id(lead)
+        lead_email = (lead.get("emails") or "").split(";")[0].strip()
+        lead_phone = (lead.get("phones") or "").split(";")[0].strip()
+        contact_doc = None
+        if contact_id:
+            contact_doc = find_mongo_contact(db, contact_id)
+            if not contact_doc:
+                raise ValueError(f"Contact {contact_id} not found")
+            cand_lids = lead_id_candidates(lead)
+            lnk = db.company_contacts.find_one(
+                {"lead_id": {"$in": cand_lids}, "contact_id": contact_doc["contact_id"]}
+            )
+            if not lnk:
+                raise ValueError(f"Contact {contact_doc['contact_id']} is not linked to lead {canon_lid}")
 
         enrollment_id = f"ENR-{uuid.uuid4().hex[:8].upper()}"
         doc = {
             "enrollment_id": enrollment_id,
-            "lead_id": lead_id,
+            "lead_id": canon_lid,
+            "contact_id": contact_doc["contact_id"] if contact_doc else "",
+            "contact_name": contact_doc.get("full_name", "") if contact_doc else (lead.get("contact_person") or ""),
             "company_name": lead.get("company_name", ""),
             "country": lead.get("country", ""),
-            "email": lead.get("emails", "").split(";")[0].strip(),
-            "phone": lead.get("phones", "").split(";")[0].strip(),
+            "email": (contact_doc.get("email") or lead_email) if contact_doc else lead_email,
+            "phone": (contact_doc.get("phone") or lead_phone) if contact_doc else lead_phone,
             "cadence_id": cadence_id,
             "cadence_name": cadence.get("name", ""),
             "current_step": 1,
@@ -110,16 +136,17 @@ class FollowUpEngine:
             "updated_at": now_iso(),
         }
 
-        db.cadence_enrollments.update_one(
-            {"lead_id": lead_id, "cadence_id": cadence_id},
-            {"$set": doc},
-            upsert=True
-        )
+        upsert_filter = {
+            "lead_id": canon_lid,
+            "cadence_id": cadence_id,
+            "contact_id": contact_doc["contact_id"] if contact_doc else "",
+        }
 
+        db.cadence_enrollments.update_one(upsert_filter, {"$set": doc}, upsert=True)
         return doc
 
     @classmethod
-    def pause_on_client_reply(cls, lead_id: int, reply_channel: str, message_text: str):
+    def pause_on_client_reply(cls, lead_id: Any, reply_channel: str, message_text: str):
         """
         AI True-Native CMS Auto-Pause:
         When a customer replies on Gmail OR WhatsApp, automatically pause any active
@@ -127,8 +154,10 @@ class FollowUpEngine:
         """
         db = get_db()
         now = now_iso()
+        lead = find_mongo_lead(db, lead_id)
+        candidates = lead_id_candidates(lead) if lead else lead_id_candidates(lead_id)
         res = db.cadence_enrollments.update_many(
-            {"lead_id": lead_id, "status": "Active"},
+            {"lead_id": {"$in": candidates}, "status": "Active"},
             {
                 "$set": {
                     "status": "Paused (Client Replied)",
@@ -210,6 +239,7 @@ class FollowUpEngine:
             db.omnichannel_messages.insert_one({
                 "message_id": dispatch_id,
                 "lead_id": enr["lead_id"],
+                "contact_id": enr.get("contact_id", ""),
                 "company_name": company,
                 "channel": channel,
                 "direction": "outbound",

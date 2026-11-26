@@ -4,7 +4,8 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Shell from '@/components/Shell';
 import PageLeftNav from '@/components/PageLeftNav';
-import CustomerDossier from '@/components/CustomerDossier';
+import CustomerDossier, { CustomerLead } from '@/components/CustomerDossier';
+import DossierEnrollModal from '@/components/dossier/DossierEnrollModal';
 import { fetchJson } from '@/lib/api';
 import { useTheme } from '@/context/ThemeContext';
 import { Loader2, Filter, X } from 'lucide-react';
@@ -37,6 +38,8 @@ function GlobalImportersContent() {
   const [minScore, setMinScore] = useState<number | ''>('');
   const [selectedCustomer, setSelectedCustomer] = useState<LeadItem | null>(null);
   const [convertCustomer, setConvertCustomer] = useState<LeadItem | null>(null);
+  const [enrollCustomer, setEnrollCustomer] = useState<CustomerLead | null>(null);
+  const [enrollContactId, setEnrollContactId] = useState<string>('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   const {
@@ -122,6 +125,7 @@ function GlobalImportersContent() {
       await fetchJson('/pipeline/deals', {
         method: 'POST',
         body: JSON.stringify({
+          lead_id: convertCustomer.id,
           title: formData.title || `${formData.quantity_mt} MT ${formData.commodity} - ${convertCustomer.company_name}`,
           company_name: convertCustomer.company_name,
           country: convertCustomer.country,
@@ -224,7 +228,34 @@ function GlobalImportersContent() {
 
       <LeadCreationModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onSubmit={handleCreateLead} leadType="importer" isLight={isLight} />
       <ConvertToDealModal lead={convertCustomer} isOpen={!!convertCustomer} onClose={() => setConvertCustomer(null)} onSubmit={handleConvertDeal} isLight={isLight} modalTitle="Convert Importer to Pipeline Deal" submitButtonText="Add to Funnel" accentClass={`${accentClasses.bg} ${accentClasses.bgHover}`} />
-      <CustomerDossier customer={selectedCustomer} onClose={() => setSelectedCustomer(null)} onConvertToDeal={(c) => { setSelectedCustomer(null); setConvertCustomer(c || selectedCustomer); }} />
+      <CustomerDossier
+        customer={selectedCustomer}
+        isEnrollModalOpen={!!enrollCustomer}
+        onClose={() => setSelectedCustomer(null)}
+        onConvertToDeal={(c) => {
+          setSelectedCustomer(null);
+          setConvertCustomer((c || selectedCustomer) as LeadItem);
+        }}
+        onEnroll={(c, contactId) => {
+          setEnrollCustomer(c);
+          setEnrollContactId(contactId || '');
+        }}
+        onUpdated={(updated) => {
+          setSelectedCustomer(updated as LeadItem);
+          setImporters((prev) => prev.map((item) => (item.id === updated.id ? (updated as LeadItem) : item)));
+        }}
+      />
+      <DossierEnrollModal
+        isOpen={!!enrollCustomer}
+        lead={enrollCustomer}
+        initialContactId={enrollContactId}
+        onClose={() => {
+          setEnrollCustomer(null);
+          setEnrollContactId('');
+        }}
+        isLight={isLight}
+        accentBgClass={`${accentClasses.bg} ${accentClasses.bgHover}`}
+      />
     </Shell>
   );
 }

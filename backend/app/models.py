@@ -32,6 +32,18 @@ class Lead(db.Model):
     district = db.Column(db.String(100), default="")
     category_or_role = db.Column(db.String(100), default="")
 
+    origin_state = db.Column(db.String(100), default="")
+    b2b_directory = db.Column(db.String(200), default="")
+    harvest_date = db.Column(db.String(50), default="")
+    customs_manifest_data = db.Column(db.Text, default="")
+    source_name = db.Column(db.String(200), default="")
+    source_category = db.Column(db.String(150), default="")
+    source_reliability = db.Column(db.Integer, default=96)
+    shipment_volume = db.Column(db.String(150), default="")
+    annual_volume_est = db.Column(db.String(150), default="")
+    nearest_port = db.Column(db.String(150), default="")
+    extraction_notes = db.Column(db.Text, default="")
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(
         db.DateTime,
@@ -39,6 +51,8 @@ class Lead(db.Model):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    contact_links = db.relationship("CompanyContact", back_populates="lead", cascade="all, delete-orphan")
 
     def to_dict(self) -> dict:
         # Determine coordinates and nearest port based on city/district/country
@@ -105,11 +119,11 @@ class Lead(db.Model):
         vol_est = f"{(score * 180):,} MT / Year" if score > 0 else "5,000 MT / Year"
         risk_tier = "Tier 1 Verified (Grade A+)" if score >= 80 else "Commercial Active Trader"
         lanes = [
-            f"Kolkata Port (INCCU) &rarr; {port}",
-            f"Haldia Port (INHAL) &rarr; {port}",
+            f"Kolkata Port (INCCU) → {port}",
+            f"Haldia Port (INHAL) → {port}",
         ]
 
-        varieties = [v.strip() for v in (self.matched_varieties or "").split(",") if v.strip()]
+        varieties = [v.strip() for v in re.split(r"[;,]", self.matched_varieties or "") if v.strip()]
         if not varieties:
             varieties = ["Non-Basmati Grains", "Parboiled Cargo", "Agricultural Merchandise"]
 
@@ -122,7 +136,7 @@ class Lead(db.Model):
 
         clean_digits = re.sub(r"[^\d]", "", direct_phone or (self.phones or ""))
         wa_url = ""
-        if clean_digits:
+        if clean_digits and is_imp:
             contact_label = (self.contact_person or "").split("(")[0].strip() or "Purchase Manager"
             co_label = (self.company_name or "").split("(")[0].strip() or "your company"
             wa_text = urllib.parse.quote_plus(
@@ -134,6 +148,13 @@ class Lead(db.Model):
         clean_co = re.sub(r"\b(?:LLC|W\.L\.L\.|Ltd|SARL|Est\.|Inc\.|FZE|Pte)\b", "", self.company_name or "", flags=re.IGNORECASE).strip()
         li_url = f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote_plus(clean_co + ' Purchase Manager')}" if clean_co else ""
         corp_contact_url = f"{self.website.rstrip('/')}/contact" if self.website else ""
+
+        n_port = self.nearest_port or port
+        created_iso = self.created_at.isoformat() if self.created_at else ""
+        try:
+            contacts_cnt = len(self.contact_links) if self.id else 0
+        except Exception:
+            contacts_cnt = 0
 
         return {
             "id": self.id,
@@ -162,21 +183,32 @@ class Lead(db.Model):
             "inquiry_or_profile": self.inquiry_or_profile,
             "priority_score": self.priority_score,
             "source_url": self.source_url,
+            "source_name": self.source_name or "Global Verified Trade Directory",
+            "source_category": self.source_category or ("Commercial Trade Manifest" if is_imp else "B2B Trade Directory"),
+            "source_reliability": self.source_reliability if self.source_reliability is not None else 96,
+            "b2b_directory": self.b2b_directory or self.source_name or "Global Verified Trade Directory",
+            "harvest_date": self.harvest_date or created_iso,
+            "customs_manifest_data": self.customs_manifest_data or "",
+            "shipment_volume": self.shipment_volume or ("1-3 Containers / mo (25-75 MT)" if is_imp else ""),
+            "importer_tier": getattr(self, "importer_tier", None) or ("sme_importer" if is_imp else ""),
+            "extraction_notes": self.extraction_notes or "",
             "lead_type": self.lead_type,
             "gstin": self.gstin,
             "pan": self.pan,
             "fssai_or_sfda_status": self.fssai_or_sfda_status,
             "state": self.state,
+            "origin_state": self.origin_state or self.state or "",
             "district": self.district,
             "category_or_role": self.category_or_role,
             "latitude": lat,
             "longitude": lng,
-            "nearest_port": port,
+            "nearest_port": n_port,
             "trade_role": trade_role,
-            "annual_volume_est": vol_est,
+            "annual_volume_est": self.annual_volume_est or vol_est,
             "risk_tier": risk_tier,
             "key_trade_lanes": lanes,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "contacts_count": contacts_cnt,
+            "created_at": created_iso or None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
@@ -210,3 +242,6 @@ class ScrapeJob(db.Model):
 
     def __repr__(self):
         return f"<ScrapeJob {self.id}: {self.job_type} ({self.status})>"
+
+
+from app.models_contacts import Contact, CompanyContact  # noqa: E402, F401
