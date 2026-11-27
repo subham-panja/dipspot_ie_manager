@@ -178,6 +178,7 @@ class FollowUpEngine:
             }
         )
         logger.info(f"Auto-paused {res.modified_count} cadences for lead #{lead_id} due to inbound {reply_channel} reply.")
+        return int(res.modified_count)
 
     @classmethod
     def execute_due_followups(cls) -> Dict[str, any]:

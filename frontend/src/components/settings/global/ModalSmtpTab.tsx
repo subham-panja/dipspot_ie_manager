@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { ShieldCheck, CheckCircle, EyeOff, Eye, Sparkles, Save } from 'lucide-react';
+import Link from 'next/link';
+import { ShieldCheck, CheckCircle, EyeOff, Eye, Sparkles, Save, ExternalLink } from 'lucide-react';
 import { ModalSmtpConfig } from './globalSettingsTypes';
 
 interface ModalSmtpTabProps {
@@ -13,6 +14,7 @@ interface ModalSmtpTabProps {
   smtpStatusMsg: string;
   onSaveSmtp: (e: React.FormEvent) => Promise<void>;
   onTestSmtp: () => Promise<void>;
+  onCloseModal?: () => void;
   isLight: boolean;
   accentClasses: { btn: string; [key: string]: any };
 }
@@ -26,6 +28,7 @@ export default function ModalSmtpTab({
   smtpStatusMsg,
   onSaveSmtp,
   onTestSmtp,
+  onCloseModal,
   isLight,
   accentClasses,
 }: ModalSmtpTabProps) {
@@ -137,20 +140,30 @@ export default function ModalSmtpTab({
         </div>
       </div>
 
-      <div className="p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/50 space-y-2">
-        <div className="font-bold text-slate-300 text-xs">Omnichannel Gateway Status:</div>
+      <div className="p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/50 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-bold text-slate-300 text-xs">Omnichannel Gateway Status:</div>
+          <Link
+            href="/settings?tab=chatwoot"
+            onClick={() => onCloseModal?.()}
+            className="text-[11px] font-semibold text-purple-400 hover:text-purple-300 flex items-center gap-1 transition"
+          >
+            <span>Open Chatwoot &amp; Channel Settings</span>
+            <ExternalLink className="w-3 h-3" />
+          </Link>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-            <div className="font-bold">✉️ Email Channel</div>
-            <div className="text-[10px] text-emerald-300">Active (Gmail SMTP)</div>
+            <div className="font-bold">Email Channel</div>
+            <div className="text-[10px] text-emerald-300">Active (Gmail SMTP + Chatwoot)</div>
           </div>
-          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">
-            <div className="font-bold">💬 WhatsApp Gateway</div>
-            <div className="text-[10px] text-amber-300">Upcoming / In Development</div>
+          <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+            <div className="font-bold">WhatsApp Gateway</div>
+            <div className="text-[10px] text-emerald-300">Meta Cloud API / Chatwoot</div>
           </div>
-          <div className="p-2 rounded-lg bg-slate-800/60 border border-slate-700/60 text-slate-400">
-            <div className="font-bold">📱 SMS Carrier</div>
-            <div className="text-[10px] text-slate-400">Upcoming / Carrier Webhook</div>
+          <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300">
+            <div className="font-bold">Website Live Chat</div>
+            <div className="text-[10px] text-purple-200">Self-Hosted Chatwoot Widget SDK</div>
           </div>
         </div>
       </div>

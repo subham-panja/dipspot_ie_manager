@@ -89,6 +89,18 @@ def init_db(db: Optional[Database] = None):
         [("campaign_id", pymongo.ASCENDING), ("lead_id", pymongo.ASCENDING), ("contact_id", pymongo.ASCENDING)],
         unique=True,
     )
+    db.omnichannel_messages.create_index([("lead_id", pymongo.ASCENDING), ("timestamp", pymongo.ASCENDING)])
+    db.omnichannel_messages.create_index([("chatwoot_message_id", pymongo.ASCENDING)])
+    db.omnichannel_messages.create_index([("chatwoot_conversation_id", pymongo.ASCENDING), ("timestamp", pymongo.ASCENDING)])
+    db.omnichannel_messages.create_index([("message_id", pymongo.ASCENDING)])
+    db.chatwoot_conversation_meta.create_index([("lead_id", pymongo.ASCENDING)])
+    db.chatwoot_conversation_meta.create_index([("conversation_id", pymongo.ASCENDING)])
+    db.chatwoot_conversation_meta.create_index([("contact_id", pymongo.ASCENDING)])
+    db.chatwoot_conversation_meta.create_index([("visitor_thread_id", pymongo.ASCENDING)])
+    db.chatwoot_webhook_deliveries.create_index([("delivery_id", pymongo.ASCENDING)], unique=True)
+    db.chatwoot_webhook_deliveries.create_index([("received_at", pymongo.ASCENDING)])
+    db.cadence_enrollments.create_index([("lead_id", pymongo.ASCENDING), ("status", pymongo.ASCENDING)])
+    db.cadence_enrollments.create_index([("enrollment_id", pymongo.ASCENDING)])
 
     # 1. Seed System Configuration if missing
     if not db.system_config.find_one({"_id": "singleton_config"}):

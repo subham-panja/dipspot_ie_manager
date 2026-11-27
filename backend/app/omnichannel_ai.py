@@ -5,9 +5,8 @@ from typing import Any, Dict, Optional
 
 def classify_inbound_intent(text: str) -> Dict[str, Any]:
     """AI Intent & Sentiment Classifier for inbound commercial inquiries."""
-    text_low = text.lower()
+    text_low = (text or "").lower()
 
-    # 1. Unsubscribe / Negative (Safety & Opt-Out Priority)
     if any(k in text_low for k in ["stop", "unsubscribe", "not interested", "remove", "do not contact", "cancel"]):
         return {
             "intent": "Unsubscribe / Opt-Out",
@@ -17,7 +16,6 @@ def classify_inbound_intent(text: str) -> Dict[str, Any]:
             "suggested_action": "Blacklist from Outreach Cadences",
         }
 
-    # 2. Price Objection / Negotiation (Evaluate before general commodity/MT keywords)
     if any(k in text_low for k in ["too high", "expensive", "discount", "cheaper", "better price", "competitor", "counter"]):
         return {
             "intent": "Price Negotiation / Counter-Offer",
@@ -27,7 +25,6 @@ def classify_inbound_intent(text: str) -> Dict[str, Any]:
             "suggested_action": "Offer Volume Discount for 5+ Containers",
         }
 
-    # 3. High Purchase Intent / RFQ
     if any(k in text_low for k in ["quote", "price", "cif", "fob", "mt", "container", "interested", "specification", "coi", "payment term"]):
         return {
             "intent": "High Commercial Intent (RFQ)",
@@ -37,7 +34,6 @@ def classify_inbound_intent(text: str) -> Dict[str, Any]:
             "suggested_action": "Issue Formal Proforma Invoice / Soft Offer",
         }
 
-    # 4. Out of office / generic
     if any(k in text_low for k in ["out of office", "auto reply", "away until", "vacation"]):
         return {
             "intent": "Out of Office / Auto-Reply",
@@ -73,8 +69,9 @@ def generate_ai_smart_draft(
         intent_info = classify_inbound_intent(last_message) if last_message else {"intent": customer.get("latest_intent", "")}
 
     intent = intent_info.get("intent", "")
+    ch_low = str(channel or "Email").strip().lower()
 
-    if channel.lower() == "whatsapp":
+    if ch_low == "whatsapp":
         if "RFQ" in intent or "Commercial Intent" in intent or "quote" in last_message.lower():
             return (
                 f"Hi {contact}, thank you for reaching out to TradePulse EXIM regarding {company}. "
@@ -87,6 +84,19 @@ def generate_ai_smart_draft(
                 f"Shall we issue a formal revised SCO today?"
             )
         return f"Hello {contact}, following up regarding {company}'s import requirements for {commodity} to {port}. Let us know your delivery timeline."
+
+    if ch_low in ("website", "web", "webwidget", "web_widget", "website live chat"):
+        if "RFQ" in intent or "Commercial Intent" in intent or "quote" in last_message.lower():
+            return (
+                f"Welcome to TradePulse EXIM Live Desk, {contact}! For {company}, we have spot {commodity} ready for CIF {port}. "
+                f"Share your target container count and email to receive our formal SCO right away."
+            )
+        if "Negotiation" in intent:
+            return (
+                f"Hi {contact}, we can review volume pricing ($12/MT tier rebate on 5+ FCL) for {company} to {port}. "
+                f"How many containers are you planning this month?"
+            )
+        return f"Welcome {contact}! Our export specialists can share {commodity} specs and CIF {port} lead times for {company}. How can we assist?"
 
     if "RFQ" in intent or "Commercial Intent" in intent:
         return (

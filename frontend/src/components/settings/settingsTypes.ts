@@ -48,13 +48,73 @@ export interface SmtpConfig {
 }
 
 export interface WhatsAppConfig {
+  configured?: boolean;
   provider: string;
-  api_token: string;
   phone_number_id: string;
+  business_account_id: string;
   webhook_url: string;
   personal_daily_cap: number;
   typing_delay_jitter: string;
   auto_stop_opt_out: boolean;
+  has_access_token?: boolean;
+  masked_access_token?: string;
+  access_token?: string;
+  has_webhook_verify_token?: boolean;
+  masked_webhook_verify_token?: string;
+  webhook_verify_token?: string;
+  updated_at?: string | null;
+}
+
+export interface ChatwootInboxItem {
+  id: number | string;
+  name: string;
+  channel_type?: string;
+}
+
+export interface ChatwootTestResult {
+  success: boolean;
+  reachable: boolean;
+  status_code: number | null;
+  inboxes: ChatwootInboxItem[];
+  message: string;
+}
+
+export interface ChatwootConfig {
+  configured?: boolean;
+  enabled: boolean;
+  base_url: string;
+  public_url: string;
+  account_id: string;
+  email_inbox_id: string;
+  whatsapp_inbox_id: string;
+  website_inbox_id: string;
+  website_token: string;
+  has_api_token?: boolean;
+  masked_api_token?: string;
+  api_access_token?: string;
+  has_webhook_secret?: boolean;
+  masked_webhook_secret?: string;
+  webhook_secret?: string;
+  has_website_hmac_secret?: boolean;
+  masked_website_hmac_secret?: string;
+  website_hmac_secret?: string;
+  channels?: {
+    email: boolean;
+    whatsapp: boolean;
+    website: boolean;
+  };
+  updated_at?: string | null;
+}
+
+export interface WhatsAppClearFlags {
+  clear_access_token: boolean;
+  clear_webhook_verify_token: boolean;
+}
+
+export interface ChatwootClearFlags {
+  clear_api_token: boolean;
+  clear_webhook_secret: boolean;
+  clear_website_hmac_secret: boolean;
 }
 
 export interface TrashLead {
@@ -71,6 +131,7 @@ export type SettingsTabType =
   | 'dedup'
   | 'smtp'
   | 'whatsapp'
+  | 'chatwoot'
   | 'appearance'
   | 'trash';
 

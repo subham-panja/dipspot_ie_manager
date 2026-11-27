@@ -9,8 +9,23 @@ import {
   DedupConfig,
   SmtpConfig,
   WhatsAppConfig,
+  ChatwootConfig,
+  ChatwootTestResult,
+  WhatsAppClearFlags,
+  ChatwootClearFlags,
   TrashLead,
 } from './settingsTypes';
+import {
+  DEFAULT_WHATSAPP_CONFIG,
+  DEFAULT_CHATWOOT_CONFIG,
+  EMPTY_WHATSAPP_CLEAR_FLAGS,
+  EMPTY_CHATWOOT_CLEAR_FLAGS,
+  normalizeWhatsAppResponse,
+  buildWhatsAppPatchPayload,
+  normalizeChatwootResponse,
+  buildChatwootPatchPayload,
+  buildChatwootTestPayload,
+} from './channelConfigUtils';
 
 export function useSettingsData() {
   const [saving, setSaving] = useState(false);
@@ -53,15 +68,17 @@ export function useSettingsData() {
   const [testSmtpResult, setTestSmtpResult] = useState<string | null>(null);
   const [smtpStopper, setSmtpStopper] = useState<SmtpStopperStatus | null>(null);
 
-  const [whatsapp, setWhatsapp] = useState<WhatsAppConfig>({
-    provider: 'meta_cloud_api',
-    api_token: 'EAABwzLIX4ZAIBA...',
-    phone_number_id: '109849201948291',
-    webhook_url: 'https://api.tradepulse.exim/webhooks/whatsapp',
-    personal_daily_cap: 50,
-    typing_delay_jitter: '4500ms - 8200ms',
-    auto_stop_opt_out: true,
+  const [whatsapp, setWhatsapp] = useState<WhatsAppConfig>({ ...DEFAULT_WHATSAPP_CONFIG });
+  const [whatsappClearFlags, setWhatsappClearFlags] = useState<WhatsAppClearFlags>({
+    ...EMPTY_WHATSAPP_CLEAR_FLAGS,
   });
+
+  const [chatwoot, setChatwoot] = useState<ChatwootConfig>({ ...DEFAULT_CHATWOOT_CONFIG });
+  const [chatwootClearFlags, setChatwootClearFlags] = useState<ChatwootClearFlags>({
+    ...EMPTY_CHATWOOT_CLEAR_FLAGS,
+  });
+  const [testingChatwoot, setTestingChatwoot] = useState(false);
+  const [testChatwootResult, setTestChatwootResult] = useState<ChatwootTestResult | null>(null);
 
   const [trashLeads, setTrashLeads] = useState<TrashLead[]>([]);
   const [loadingTrash, setLoadingTrash] = useState(false);
@@ -116,16 +133,26 @@ export function useSettingsData() {
 
   const loadSettings = async () => {
     try {
-      const [compRes, dedupRes, smtpRes, sourcesRes] = await Promise.all([
-        fetchJson<{ company: CompanyProfile }>('/config/company').catch(() => ({ company })),
-        fetchJson<{ dedup: DedupConfig }>('/config/dedup').catch(() => ({ dedup })),
-        fetchJson<{ smtp: SmtpConfig }>('/config/smtp').catch(() => ({ smtp })),
-        fetchJson<{ sources: SourceItem[] }>('/config/sources').catch(() => ({ sources: [] })),
+      const [compRes, dedupRes, smtpRes, sourcesRes, waRes, cwRes] = await Promise.all([
+        fetchJson<{ company: CompanyProfile }>('/config/company').catch(() => null),
+        fetchJson<{ dedup: DedupConfig }>('/config/dedup').catch(() => null),
+        fetchJson<{ smtp: SmtpConfig }>('/config/smtp').catch(() => null),
+        fetchJson<{ sources: SourceItem[] }>('/config/sources').catch(() => null),
+        fetchJson<Record<string, any>>('/config/whatsapp').catch(() => null),
+        fetchJson<Record<string, any>>('/config/chatwoot').catch(() => null),
       ]);
       if (compRes?.company) setCompany(compRes.company);
       if (dedupRes?.dedup) setDedup(dedupRes.dedup);
       if (smtpRes?.smtp) setSmtp(smtpRes.smtp);
       if (sourcesRes?.sources) setSources(sourcesRes.sources);
+      if (waRes) {
+        setWhatsapp(normalizeWhatsAppResponse(waRes));
+        setWhatsappClearFlags({ ...EMPTY_WHATSAPP_CLEAR_FLAGS });
+      }
+      if (cwRes) {
+        setChatwoot(normalizeChatwootResponse(cwRes));
+        setChatwootClearFlags({ ...EMPTY_CHATWOOT_CLEAR_FLAGS });
+      }
       loadSmtpStopper();
     } catch (e) {
       console.error('Failed to load settings', e);
@@ -190,10 +217,7 @@ export function useSettingsData() {
   const saveCompany = async () => {
     try {
       setSaving(true);
-      await fetchJson('/config/company', {
-        method: 'PATCH',
-        body: JSON.stringify(company),
-      });
+      await fetchJson('/config/company', { method: 'PATCH', body: JSON.stringify(company) });
       showNotification('Company EXIM profile saved successfully!');
     } catch (err: any) {
       showNotification(err.message || 'Failed to save company profile', 'error');
@@ -205,10 +229,7 @@ export function useSettingsData() {
   const saveDedup = async () => {
     try {
       setSaving(true);
-      await fetchJson('/config/dedup', {
-        method: 'PATCH',
-        body: JSON.stringify(dedup),
-      });
+      await fetchJson('/config/dedup', { method: 'PATCH', body: JSON.stringify(dedup) });
       showNotification('ML Deduplication parameters & threshold updated!');
     } catch (err: any) {
       showNotification(err.message || 'Failed to save deduplication settings', 'error');
@@ -220,10 +241,7 @@ export function useSettingsData() {
   const saveSmtp = async () => {
     try {
       setSaving(true);
-      await fetchJson('/config/smtp', {
-        method: 'PATCH',
-        body: JSON.stringify(smtp),
-      });
+      await fetchJson('/config/smtp', { method: 'PATCH', body: JSON.stringify(smtp) });
       showNotification('Gmail SMTP delivery settings saved!');
     } catch (err: any) {
       showNotification(err.message || 'Failed to save SMTP settings', 'error');
@@ -247,6 +265,99 @@ export function useSettingsData() {
       showNotification('SMTP test connection failed', 'error');
     } finally {
       setTestingSmtp(false);
+    }
+  };
+
+  const saveWhatsapp = async () => {
+    try {
+      setSaving(true);
+      const payload = buildWhatsAppPatchPayload(whatsapp, whatsappClearFlags);
+      const res = await fetchJson<Record<string, any>>('/config/whatsapp', {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      setWhatsapp(normalizeWhatsAppResponse(res));
+      setWhatsappClearFlags({ ...EMPTY_WHATSAPP_CLEAR_FLAGS });
+      showNotification(res?.message || 'WhatsApp Cloud API gateway updated!');
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to save WhatsApp settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveChatwoot = async () => {
+    try {
+      setSaving(true);
+      const payload = buildChatwootPatchPayload(chatwoot, chatwootClearFlags);
+      const res = await fetchJson<Record<string, any>>('/config/chatwoot', {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      setChatwoot(normalizeChatwootResponse(res));
+      setChatwootClearFlags({ ...EMPTY_CHATWOOT_CLEAR_FLAGS });
+      showNotification(res?.message || 'Chatwoot omnichannel settings saved!');
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to save Chatwoot settings', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const testChatwoot = async () => {
+    try {
+      setTestingChatwoot(true);
+      setTestChatwootResult(null);
+      const payload = buildChatwootTestPayload(chatwoot);
+      const res = await fetchJson<ChatwootTestResult>('/config/chatwoot/test', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      setTestChatwootResult(res);
+      showNotification(
+        res?.message || (res?.success ? 'Chatwoot reachable!' : 'Chatwoot probe finished'),
+        res?.success ? 'success' : 'error'
+      );
+    } catch (err: any) {
+      const msg = err.message || 'Unable to reach Chatwoot server';
+      setTestChatwootResult({
+        success: false,
+        reachable: false,
+        status_code: null,
+        inboxes: [],
+        message: msg,
+      });
+      showNotification(msg, 'error');
+    } finally {
+      setTestingChatwoot(false);
+    }
+  };
+
+  const clearWhatsappSecret = (field: keyof WhatsAppClearFlags, nextValue?: boolean) => {
+    setWhatsappClearFlags((prev) => ({
+      ...prev,
+      [field]: typeof nextValue === 'boolean' ? nextValue : !prev[field],
+    }));
+    if (nextValue === false) return;
+    if (field === 'clear_access_token') {
+      setWhatsapp((prev) => ({ ...prev, access_token: '' }));
+    } else {
+      setWhatsapp((prev) => ({ ...prev, webhook_verify_token: '' }));
+    }
+  };
+
+  const clearChatwootSecret = (field: keyof ChatwootClearFlags, nextValue?: boolean) => {
+    setChatwootClearFlags((prev) => ({
+      ...prev,
+      [field]: typeof nextValue === 'boolean' ? nextValue : !prev[field],
+    }));
+    if (nextValue === false) return;
+    if (field === 'clear_api_token') {
+      setChatwoot((prev) => ({ ...prev, api_access_token: '' }));
+    } else if (field === 'clear_webhook_secret') {
+      setChatwoot((prev) => ({ ...prev, webhook_secret: '' }));
+    } else {
+      setChatwoot((prev) => ({ ...prev, website_hmac_secret: '' }));
     }
   };
 
@@ -302,6 +413,17 @@ export function useSettingsData() {
     handleUpdateLimit,
     whatsapp,
     setWhatsapp,
+    whatsappClearFlags,
+    clearWhatsappSecret,
+    saveWhatsapp,
+    chatwoot,
+    setChatwoot,
+    chatwootClearFlags,
+    clearChatwootSecret,
+    saveChatwoot,
+    testChatwoot,
+    testingChatwoot,
+    testChatwootResult,
     trashLeads,
     loadingTrash,
     loadTrash,

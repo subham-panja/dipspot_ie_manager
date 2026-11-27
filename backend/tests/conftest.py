@@ -79,6 +79,8 @@ def clean_db(app):
                 "campaign_enrollments",
                 "omnichannel_messages",
                 "cadence_enrollments",
+                "chatwoot_conversation_meta",
+                "chatwoot_webhook_deliveries",
             ]:
                 mongo_db[col].delete_many({})
         except Exception:

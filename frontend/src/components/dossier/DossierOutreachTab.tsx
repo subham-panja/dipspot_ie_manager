@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Megaphone, AlertCircle, Loader2, GitBranch } from 'lucide-react';
 import { CustomerLead, OutreachHistoryResponse, OutreachMessage } from './dossierTypes';
+import { normalizeChannel } from '@/components/campaigns/inbox/inboxNormalizers';
 import { fetchJson } from '@/lib/api';
 
 interface DossierOutreachTabProps {
@@ -14,7 +15,7 @@ export default function DossierOutreachTab({ lead, isLight }: DossierOutreachTab
   const [data, setData] = useState<OutreachHistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [replyChannel, setReplyChannel] = useState<'Email' | 'WhatsApp'>('Email');
+  const [replyChannel, setReplyChannel] = useState<'Email' | 'WhatsApp' | 'Website'>('Email');
   const [replyContent, setReplyContent] = useState('');
   const [sending, setSending] = useState(false);
   const [sendFeedback, setSendFeedback] = useState<string | null>(null);
@@ -142,7 +143,7 @@ export default function DossierOutreachTab({ lead, isLight }: DossierOutreachTab
           <span className={`font-bold text-[11px] ${textPrimary}`}>Quick Outreach Message</span>
           <select
             value={replyChannel}
-            onChange={(e) => setReplyChannel(e.target.value as 'Email' | 'WhatsApp')}
+            onChange={(e) => setReplyChannel(e.target.value as 'Email' | 'WhatsApp' | 'Website')}
             className={`text-[11px] px-2 py-1 rounded-lg border outline-none ${
               isLight
                 ? 'bg-white border-slate-200 text-slate-800'
@@ -151,6 +152,7 @@ export default function DossierOutreachTab({ lead, isLight }: DossierOutreachTab
           >
             <option value="Email">Email</option>
             <option value="WhatsApp">WhatsApp</option>
+            <option value="Website">Website Live Chat</option>
           </select>
         </div>
         <div className="flex gap-2">
@@ -246,33 +248,44 @@ export default function DossierOutreachTab({ lead, isLight }: DossierOutreachTab
                 Communication Log ({messages.length})
               </span>
               <div className="space-y-2">
-                {messages.map((msg, idx) => (
-                  <div key={msg.id || idx} className={`p-3 rounded-xl border space-y-1 ${cardBg}`}>
-                    <div className="flex items-center justify-between gap-2 text-[11px]">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`font-semibold ${textPrimary}`}>
-                          {msg.channel || 'Email'}
-                        </span>
-                        <span
-                          className={`text-[9px] font-mono px-1.5 py-0.5 rounded uppercase ${
-                            msg.direction === 'inbound'
-                              ? 'bg-emerald-500/15 text-emerald-500'
-                              : 'bg-blue-500/15 text-blue-400'
-                          }`}
-                        >
-                          {msg.direction || 'outbound'}
+                {messages.map((msg, idx) => {
+                  const normalizedChannel = normalizeChannel(msg.channel);
+                  return (
+                    <div key={msg.id || idx} className={`p-3 rounded-xl border space-y-1 ${cardBg}`}>
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                              normalizedChannel === 'WhatsApp'
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
+                                : normalizedChannel === 'Website'
+                                ? 'bg-purple-500/10 text-purple-400 border-purple-500/25'
+                                : 'bg-blue-500/10 text-blue-400 border-blue-500/25'
+                            }`}
+                          >
+                            {normalizedChannel}
+                          </span>
+                          <span
+                            className={`text-[9px] font-mono px-1.5 py-0.5 rounded uppercase ${
+                              msg.direction === 'inbound'
+                                ? 'bg-emerald-500/15 text-emerald-500'
+                                : 'bg-blue-500/15 text-blue-400'
+                            }`}
+                          >
+                            {msg.direction || 'outbound'}
+                          </span>
+                        </div>
+                        <span className={`font-mono text-[10px] ${textMuted}`}>
+                          {msg.timestamp ? msg.timestamp.slice(0, 16).replace('T', ' ') : ''}
                         </span>
                       </div>
-                      <span className={`font-mono text-[10px] ${textMuted}`}>
-                        {msg.timestamp ? msg.timestamp.slice(0, 16).replace('T', ' ') : ''}
-                      </span>
+                      {msg.subject && (
+                        <div className={`text-[11px] font-semibold ${textPrimary}`}>{msg.subject}</div>
+                      )}
+                      <p className={`text-xs whitespace-pre-line ${textMuted}`}>{msg.content}</p>
                     </div>
-                    {msg.subject && (
-                      <div className={`text-[11px] font-semibold ${textPrimary}`}>{msg.subject}</div>
-                    )}
-                    <p className={`text-xs whitespace-pre-line ${textMuted}`}>{msg.content}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

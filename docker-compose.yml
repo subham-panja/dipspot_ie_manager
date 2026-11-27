@@ -11,6 +11,140 @@ services:
       - MONGO_INITDB_DATABASE=trade_suite
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradepulse_network
+
+  chatwoot-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tradepulse_chatwoot_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${CHATWOOT_POSTGRES_DB:-chatwoot}
+      - POSTGRES_USER=${CHATWOOT_POSTGRES_USER:-chatwoot}
+      - POSTGRES_PASSWORD=${CHATWOOT_POSTGRES_PASSWORD:-}
+    volumes:
+      - chatwoot_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CHATWOOT_POSTGRES_USER:-chatwoot} -d ${CHATWOOT_POSTGRES_DB:-chatwoot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradepulse_network
+
+  chatwoot-redis:
+    image: redis:7-alpine
+    container_name: tradepulse_chatwoot_redis
+    restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${CHATWOOT_REDIS_PASSWORD:-}
+    command: ["sh", "-c", "if [ -n \"$$REDIS_PASSWORD\" ]; then exec redis-server --requirepass \"$$REDIS_PASSWORD\"; else exec redis-server; fi"]
+    volumes:
+      - chatwoot_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradepulse_network
+
+  chatwoot-web:
+    image: ${CHATWOOT_IMAGE:-chatwoot/chatwoot:v3.16.0}
+    container_name: tradepulse_chatwoot_web
+    restart: unless-stopped
+    entrypoint: docker/entrypoints/rails.sh
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+    ports:
+      - "${CHATWOOT_PORT:-3001}:3000"
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+    environment:
+      - RAILS_ENV=production
+      - NODE_ENV=production
+      - INSTALLATION_ENV=docker
+      - SECRET_KEY_BASE=${CHATWOOT_SECRET_KEY_BASE:-}
+      - FRONTEND_URL=${CHATWOOT_FRONTEND_URL:-http://localhost:3001}
+      - ENABLE_ACCOUNT_SIGNUP=${CHATWOOT_ENABLE_ACCOUNT_SIGNUP:-false}
+      - ACTIVE_STORAGE_SERVICE=${CHATWOOT_ACTIVE_STORAGE_SERVICE:-local}
+      - POSTGRES_HOST=chatwoot-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=${CHATWOOT_POSTGRES_DB:-chatwoot}
+      - POSTGRES_USERNAME=${CHATWOOT_POSTGRES_USER:-chatwoot}
+      - POSTGRES_PASSWORD=${CHATWOOT_POSTGRES_PASSWORD:-}
+      - REDIS_URL=${CHATWOOT_REDIS_URL:-redis://chatwoot-redis:6379}
+      - REDIS_PASSWORD=${CHATWOOT_REDIS_PASSWORD:-}
+      - MAILER_SENDER_EMAIL=${CHATWOOT_MAILER_SENDER_EMAIL:-}
+      - SMTP_ADDRESS=${CHATWOOT_SMTP_ADDRESS:-}
+      - SMTP_PORT=${CHATWOOT_SMTP_PORT:-587}
+      - SMTP_USERNAME=${CHATWOOT_SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${CHATWOOT_SMTP_PASSWORD:-}
+      - SMTP_DOMAIN=${CHATWOOT_SMTP_DOMAIN:-}
+      - SMTP_AUTHENTICATION=${CHATWOOT_SMTP_AUTHENTICATION:-plain}
+      - SMTP_ENABLE_STARTTLS_AUTO=${CHATWOOT_SMTP_ENABLE_STARTTLS_AUTO:-true}
+      - WHATSAPP_APP_ID=${WHATSAPP_APP_ID:-}
+      - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET:-}
+      - WHATSAPP_CONFIGURATION_ID=${WHATSAPP_CONFIGURATION_ID:-}
+      - WHATSAPP_API_VERSION=${WHATSAPP_API_VERSION:-v18.0}
+    volumes:
+      - chatwoot_storage:/app/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    networks:
+      - tradepulse_network
+
+  chatwoot-worker:
+    image: ${CHATWOOT_IMAGE:-chatwoot/chatwoot:v3.16.0}
+    container_name: tradepulse_chatwoot_worker
+    restart: unless-stopped
+    entrypoint: docker/entrypoints/rails.sh
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+    environment:
+      - RAILS_ENV=production
+      - NODE_ENV=production
+      - INSTALLATION_ENV=docker
+      - SECRET_KEY_BASE=${CHATWOOT_SECRET_KEY_BASE:-}
+      - FRONTEND_URL=${CHATWOOT_FRONTEND_URL:-http://localhost:3001}
+      - ENABLE_ACCOUNT_SIGNUP=${CHATWOOT_ENABLE_ACCOUNT_SIGNUP:-false}
+      - ACTIVE_STORAGE_SERVICE=${CHATWOOT_ACTIVE_STORAGE_SERVICE:-local}
+      - POSTGRES_HOST=chatwoot-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=${CHATWOOT_POSTGRES_DB:-chatwoot}
+      - POSTGRES_USERNAME=${CHATWOOT_POSTGRES_USER:-chatwoot}
+      - POSTGRES_PASSWORD=${CHATWOOT_POSTGRES_PASSWORD:-}
+      - REDIS_URL=${CHATWOOT_REDIS_URL:-redis://chatwoot-redis:6379}
+      - REDIS_PASSWORD=${CHATWOOT_REDIS_PASSWORD:-}
+      - MAILER_SENDER_EMAIL=${CHATWOOT_MAILER_SENDER_EMAIL:-}
+      - SMTP_ADDRESS=${CHATWOOT_SMTP_ADDRESS:-}
+      - SMTP_PORT=${CHATWOOT_SMTP_PORT:-587}
+      - SMTP_USERNAME=${CHATWOOT_SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${CHATWOOT_SMTP_PASSWORD:-}
+      - SMTP_DOMAIN=${CHATWOOT_SMTP_DOMAIN:-}
+      - SMTP_AUTHENTICATION=${CHATWOOT_SMTP_AUTHENTICATION:-plain}
+      - SMTP_ENABLE_STARTTLS_AUTO=${CHATWOOT_SMTP_ENABLE_STARTTLS_AUTO:-true}
+      - WHATSAPP_APP_ID=${WHATSAPP_APP_ID:-}
+      - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET:-}
+      - WHATSAPP_CONFIGURATION_ID=${WHATSAPP_CONFIGURATION_ID:-}
+      - WHATSAPP_API_VERSION=${WHATSAPP_API_VERSION:-v18.0}
+    volumes:
+      - chatwoot_storage:/app/storage
     networks:
       - tradepulse_network
 
@@ -26,9 +160,26 @@ services:
       - PORT=5001
       - FLASK_ENV=production
       - MONGO_URI=mongodb://mongodb:27017/trade_suite
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-trade_suite}
       - DATABASE_PATH=instance/leads.db
+      - CHATWOOT_ENABLED=${CHATWOOT_ENABLED:-true}
+      - CHATWOOT_BASE_URL=${CHATWOOT_INTERNAL_URL:-http://chatwoot-web:3000}
+      - CHATWOOT_PUBLIC_URL=${CHATWOOT_PUBLIC_URL:-http://localhost:3001}
+      - CHATWOOT_ACCOUNT_ID=${CHATWOOT_ACCOUNT_ID:-1}
+      - CHATWOOT_API_ACCESS_TOKEN=${CHATWOOT_API_ACCESS_TOKEN:-}
+      - CHATWOOT_WEBHOOK_SECRET=${CHATWOOT_WEBHOOK_SECRET:-}
+      - CHATWOOT_EMAIL_INBOX_ID=${CHATWOOT_EMAIL_INBOX_ID:-}
+      - CHATWOOT_WHATSAPP_INBOX_ID=${CHATWOOT_WHATSAPP_INBOX_ID:-}
+      - CHATWOOT_WEBSITE_INBOX_ID=${CHATWOOT_WEBSITE_INBOX_ID:-}
+      - CHATWOOT_WEBSITE_TOKEN=${CHATWOOT_WEBSITE_TOKEN:-}
+      - CHATWOOT_WEBSITE_HMAC_SECRET=${CHATWOOT_WEBSITE_HMAC_SECRET:-}
+      - WHATSAPP_CLOUD_API_WEBHOOK_VERIFY_TOKEN=${WHATSAPP_CLOUD_API_WEBHOOK_VERIFY_TOKEN:-}
+      - WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID:-}
+      - WHATSAPP_BUSINESS_ACCOUNT_ID=${WHATSAPP_BUSINESS_ACCOUNT_ID:-}
+      - WHATSAPP_API_ACCESS_TOKEN=${WHATSAPP_API_ACCESS_TOKEN:-}
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     volumes:
       - ./backend/instance:/app/instance
     networks:
@@ -43,7 +194,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:5001/api
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:5001/api}
+      - NEXT_PUBLIC_CHATWOOT_URL=${NEXT_PUBLIC_CHATWOOT_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_CHATWOOT_WEBSITE_TOKEN=${NEXT_PUBLIC_CHATWOOT_WEBSITE_TOKEN:-}
     depends_on:
       - backend
     networks:
@@ -51,6 +204,12 @@ services:
 
 volumes:
   mongo_data:
+    driver: local
+  chatwoot_postgres_data:
+    driver: local
+  chatwoot_redis_data:
+    driver: local
+  chatwoot_storage:
     driver: local
 
 networks:

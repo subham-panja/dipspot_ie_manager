@@ -13,6 +13,7 @@ from app.routes.shipments import shipments_bp
 from app.routes.intelligence import intelligence_bp
 from app.routes.config_routes import config_bp
 from app.routes.omnichannel import omnichannel_bp
+from app.routes.omnichannel_chatwoot import chatwoot_bp
 
 
 def create_app(testing: bool = False) -> Flask:
@@ -46,6 +47,7 @@ def create_app(testing: bool = False) -> Flask:
     app.register_blueprint(intelligence_bp)
     app.register_blueprint(config_bp)
     app.register_blueprint(omnichannel_bp)
+    app.register_blueprint(chatwoot_bp)
 
     # Auto-create tables & seed MongoDB
     with app.app_context():

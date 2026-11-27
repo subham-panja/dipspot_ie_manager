@@ -111,7 +111,7 @@ export default function CampaignsView({
             href: '/campaigns/inbox',
             onClick: () => data.setActiveTab('inbox'),
             active: data.activeTab === 'inbox',
-            desc: 'Centralized Gmail & WhatsApp CMS',
+            desc: 'Email, WhatsApp & Website Live Chat',
           },
           {
             id: 'cadences',

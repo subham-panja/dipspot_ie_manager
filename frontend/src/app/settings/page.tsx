@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Shell from '@/components/Shell';
 import { useTheme } from '@/context/ThemeContext';
 import {
@@ -9,6 +10,7 @@ import {
   Cpu,
   Mail,
   MessageSquare,
+  MessagesSquare,
   Palette,
   Trash2,
   CheckCircle2,
@@ -24,14 +26,67 @@ import SourcesRegistryTab from '@/components/settings/SourcesRegistryTab';
 import DeduplicationSettingsTab from '@/components/settings/DeduplicationSettingsTab';
 import SmtpGatewayTab from '@/components/settings/SmtpGatewayTab';
 import WhatsAppGatewayTab from '@/components/settings/WhatsAppGatewayTab';
+import ChatwootGatewayTab from '@/components/settings/ChatwootGatewayTab';
 import AppearanceTab from '@/components/settings/AppearanceTab';
 import TrashBinTab from '@/components/settings/TrashBinTab';
+
+const VALID_SETTINGS_TABS: SettingsTabType[] = [
+  'company',
+  'sources',
+  'dedup',
+  'smtp',
+  'whatsapp',
+  'chatwoot',
+  'appearance',
+  'trash',
+];
+
+function SettingsTabUrlSync({ onSyncTab }: { onSyncTab: (tab: SettingsTabType) => void }) {
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as SettingsTabType | null;
+    if (tabParam && VALID_SETTINGS_TABS.includes(tabParam)) {
+      onSyncTab(tabParam);
+    }
+  }, [searchParams, onSyncTab]);
+
+  return null;
+}
 
 export default function DedicatedSettingsPage() {
   const { theme, accentClasses } = useTheme();
   const isLight = theme === 'light';
   const [activeTab, setActiveTab] = useState<SettingsTabType>('company');
   const d = useSettingsData();
+
+  useEffect(() => {
+    const syncFromLocation = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get('tab') as SettingsTabType | null;
+        if (tabParam && VALID_SETTINGS_TABS.includes(tabParam)) {
+          setActiveTab(tabParam);
+        }
+      } catch {
+        // ignore invalid search string
+      }
+    };
+    syncFromLocation();
+    window.addEventListener('popstate', syncFromLocation);
+    return () => window.removeEventListener('popstate', syncFromLocation);
+  }, []);
+
+  const handleSelectTab = (tabId: SettingsTabType) => {
+    setActiveTab(tabId);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', tabId);
+      window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+    } catch {
+      // ignore invalid URL state
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'trash') d.loadTrash();
@@ -47,13 +102,27 @@ export default function DedicatedSettingsPage() {
     },
     { id: 'dedup', label: 'ML Deduplication & Merging', icon: <Cpu className="w-4 h-4" />, badge: `${d.dedup.dedup_threshold}%` },
     { id: 'smtp', label: 'Email & SMTP Gateway', icon: <Mail className="w-4 h-4" /> },
-    { id: 'whatsapp', label: 'WhatsApp & SMS Channels', icon: <MessageSquare className="w-4 h-4" /> },
+    {
+      id: 'whatsapp',
+      label: 'WhatsApp Cloud API',
+      icon: <MessageSquare className="w-4 h-4" />,
+      badge: d.whatsapp.configured ? 'Ready' : undefined,
+    },
+    {
+      id: 'chatwoot',
+      label: 'Chatwoot Omnichannel',
+      icon: <MessagesSquare className="w-4 h-4" />,
+      badge: d.chatwoot.configured ? 'Connected' : 'Setup',
+    },
     { id: 'appearance', label: 'Themes & UI Appearance', icon: <Palette className="w-4 h-4" /> },
     { id: 'trash', label: 'Soft-Delete Trash Bin', icon: <Trash2 className="w-4 h-4" />, badge: d.trashLeads.length > 0 ? d.trashLeads.length : undefined },
   ];
 
   return (
     <Shell>
+      <Suspense fallback={null}>
+        <SettingsTabUrlSync onSyncTab={setActiveTab} />
+      </Suspense>
       <div className="space-y-6 pb-16">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
@@ -62,11 +131,11 @@ export default function DedicatedSettingsPage() {
                 <Settings className="w-5 h-5" />
               </span>
               <h1 className={`text-2xl font-black tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                System Settings & Configuration
+                System Settings &amp; Configuration
               </h1>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Configure enterprise EXIM identity, 95% ML deduplication, verified trade sources, SMTP delivery, and soft-delete trash.
+              Configure enterprise EXIM identity, 95% ML deduplication, verified trade sources, SMTP delivery, WhatsApp Cloud API, and self-hosted Chatwoot omnichannel channels.
             </p>
           </div>
 
@@ -106,7 +175,7 @@ export default function DedicatedSettingsPage() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as SettingsTabType)}
+                  onClick={() => handleSelectTab(tab.id as SettingsTabType)}
                   className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition shrink-0 ${
                     isActive
                       ? isLight
@@ -123,8 +192,12 @@ export default function DedicatedSettingsPage() {
                     <span
                       className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ml-1 ${
                         isActive
-                          ? isLight ? 'bg-slate-200 text-slate-800' : 'bg-slate-700 text-white'
-                          : isLight ? 'bg-slate-100 text-slate-500' : 'bg-slate-800 text-slate-400'
+                          ? isLight
+                            ? 'bg-slate-200 text-slate-800'
+                            : 'bg-slate-700 text-white'
+                          : isLight
+                          ? 'bg-slate-100 text-slate-500'
+                          : 'bg-slate-800 text-slate-400'
                       }`}
                     >
                       {tab.badge}
@@ -192,7 +265,26 @@ export default function DedicatedSettingsPage() {
           <WhatsAppGatewayTab
             whatsapp={d.whatsapp}
             setWhatsapp={d.setWhatsapp}
-            onSave={() => d.showNotification('WhatsApp & SMS configuration updated!')}
+            clearFlags={d.whatsappClearFlags}
+            onClearSecret={d.clearWhatsappSecret}
+            onSave={d.saveWhatsapp}
+            saving={d.saving}
+            isLight={isLight}
+            accentClasses={accentClasses}
+          />
+        )}
+
+        {activeTab === 'chatwoot' && (
+          <ChatwootGatewayTab
+            chatwoot={d.chatwoot}
+            setChatwoot={d.setChatwoot}
+            clearFlags={d.chatwootClearFlags}
+            onClearSecret={d.clearChatwootSecret}
+            onSave={d.saveChatwoot}
+            onTest={d.testChatwoot}
+            testing={d.testingChatwoot}
+            testResult={d.testChatwootResult}
+            saving={d.saving}
             isLight={isLight}
             accentClasses={accentClasses}
           />

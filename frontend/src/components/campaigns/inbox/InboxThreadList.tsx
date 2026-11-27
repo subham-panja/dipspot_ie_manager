@@ -5,10 +5,16 @@ import {
   Search,
   Mail,
   Smartphone,
+  Globe,
   RefreshCw,
   Pause,
 } from 'lucide-react';
-import { OmnichannelThread } from './inboxTypes';
+import {
+  OmnichannelThread,
+  InboxChannelFilter,
+  InboxIntentFilter,
+} from './inboxTypes';
+import { filterInboxThreads } from './inboxNormalizers';
 
 interface InboxThreadListProps {
   threads: OmnichannelThread[];
@@ -17,10 +23,10 @@ interface InboxThreadListProps {
   onSelectThread: (thread: OmnichannelThread) => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
-  filterChannel: 'All' | 'Email' | 'WhatsApp';
-  setFilterChannel: (ch: 'All' | 'Email' | 'WhatsApp') => void;
-  filterIntent: 'All' | 'RFQ' | 'Negotiation' | 'Unsubscribe';
-  setFilterIntent: (intent: 'All' | 'RFQ' | 'Negotiation' | 'Unsubscribe') => void;
+  filterChannel: InboxChannelFilter;
+  setFilterChannel: (ch: InboxChannelFilter) => void;
+  filterIntent: InboxIntentFilter;
+  setFilterIntent: (intent: InboxIntentFilter) => void;
   isLight: boolean;
 }
 
@@ -37,19 +43,8 @@ export default function InboxThreadList({
   setFilterIntent,
   isLight,
 }: InboxThreadListProps) {
-  const filteredThreads = threads.filter((t) => {
-    const matchesSearch =
-      t.company_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.country.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.last_message.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesChannel = filterChannel === 'All' || t.latest_channel === filterChannel;
-    const matchesIntent =
-      filterIntent === 'All' ||
-      (filterIntent === 'RFQ' && t.latest_intent.includes('RFQ')) ||
-      (filterIntent === 'Negotiation' && t.latest_intent.includes('Negotiation')) ||
-      (filterIntent === 'Unsubscribe' && t.latest_intent.includes('Unsubscribe'));
-    return matchesSearch && matchesChannel && matchesIntent;
-  });
+  const filteredThreads = filterInboxThreads(threads, searchQuery, filterChannel, filterIntent);
+  const selectedId = selectedThread ? selectedThread.thread_id || String(selectedThread.lead_id) : '';
 
   return (
     <div
@@ -91,7 +86,7 @@ export default function InboxThreadList({
             }`}
           >
             <Mail className="w-3 h-3 text-blue-400" />
-            <span>Gmail</span>
+            <span>Email</span>
           </button>
           <button
             onClick={() => setFilterChannel('WhatsApp')}
@@ -103,6 +98,17 @@ export default function InboxThreadList({
           >
             <Smartphone className="w-3 h-3 text-emerald-400" />
             <span>WhatsApp</span>
+          </button>
+          <button
+            onClick={() => setFilterChannel('Website')}
+            className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 transition ${
+              filterChannel === 'Website'
+                ? 'bg-purple-600 text-white font-bold'
+                : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Globe className="w-3 h-3 text-purple-400" />
+            <span>Website</span>
           </button>
 
           <span className="text-slate-600">|</span>
@@ -141,11 +147,12 @@ export default function InboxThreadList({
             No customer threads match your search criteria.
           </div>
         ) : (
-          filteredThreads.map((t) => {
-            const isSelected = selectedThread?.thread_id === t.thread_id;
+          filteredThreads.map((t, idx) => {
+            const tid = t.thread_id || String(t.lead_id) || `row-${idx}`;
+            const isSelected = Boolean(selectedId && selectedId === tid);
             return (
               <div
-                key={t.thread_id}
+                key={tid}
                 onClick={() => onSelectThread(t)}
                 className={`p-3.5 transition cursor-pointer select-none ${
                   isSelected
@@ -163,6 +170,10 @@ export default function InboxThreadList({
                       <div className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
                         <Smartphone className="w-3 h-3" />
                       </div>
+                    ) : t.latest_channel === 'Website' ? (
+                      <div className="w-5 h-5 rounded-md bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+                        <Globe className="w-3 h-3" />
+                      </div>
                     ) : (
                       <div className="w-5 h-5 rounded-md bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
                         <Mail className="w-3 h-3" />
@@ -174,14 +185,20 @@ export default function InboxThreadList({
                   </div>
 
                   <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                    {t.last_activity_at ? new Date(t.last_activity_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}
+                    {t.last_activity_at
+                      ? new Date(t.last_activity_at).toLocaleDateString([], { month: 'short', day: 'numeric' })
+                      : ''}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                  <span>{t.contact_person || 'Procurement Desk'}</span>
-                  <span>•</span>
-                  <span>{t.country}</span>
+                  <span>{t.contact_person || (t.is_visitor_thread ? 'Live Chat Visitor' : 'Procurement Desk')}</span>
+                  {t.country && (
+                    <>
+                      <span>•</span>
+                      <span>{t.country}</span>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5 mt-2">
@@ -199,6 +216,18 @@ export default function InboxThreadList({
                     {t.latest_intent}
                   </span>
 
+                  {t.is_visitor_thread && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/25">
+                      Visitor
+                    </span>
+                  )}
+
+                  {t.chatwoot_synced && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                      Chatwoot
+                    </span>
+                  )}
+
                   {t.cadence_paused && (
                     <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20 flex items-center gap-1">
                       <Pause className="w-2.5 h-2.5" />
@@ -208,7 +237,7 @@ export default function InboxThreadList({
                 </div>
 
                 <p className="text-[11px] text-slate-400 mt-2 line-clamp-2 leading-relaxed">
-                  {t.last_message}
+                  {t.last_message || 'No messages yet.'}
                 </p>
               </div>
             );

@@ -1,17 +1,28 @@
 import uuid
+import httpx
 from flask import Blueprint, jsonify, request
 from app.db import get_db, now_iso
-from app.config import Config
+from app.config import Config, get_chatwoot_config, get_whatsapp_config
+from app.channel_config_helpers import (
+    apply_chatwoot_update,
+    apply_whatsapp_update,
+    parse_json_object_body,
+    probe_chatwoot_connection,
+)
 
 config_bp = Blueprint("config", __name__, url_prefix="/api/config")
 
 
-def serialize_doc(doc):
+def serialize_doc(doc, db=None):
     if not doc:
         return None
     d = dict(doc)
     if "_id" in d:
         d["_id"] = str(d["_id"])
+    if "chatwoot" in d:
+        d["chatwoot"] = get_chatwoot_config(db, include_secrets=False)
+    if "whatsapp" in d:
+        d["whatsapp"] = get_whatsapp_config(db, include_secrets=False)
     return d
 
 
@@ -115,7 +126,7 @@ def get_system_config():
             "updated_at": now_iso(),
         }
         db.system_config.insert_one(conf)
-    return jsonify({"config": serialize_doc(conf)})
+    return jsonify({"config": serialize_doc(conf, db=db)})
 
 
 @config_bp.route("", methods=["PATCH"])
@@ -141,7 +152,7 @@ def update_system_config():
 
     db.system_config.update_one({"_id": "singleton_config"}, {"$set": update_fields}, upsert=True)
     updated = db.system_config.find_one({"_id": "singleton_config"})
-    return jsonify({"config": serialize_doc(updated), "message": "System preferences updated successfully"})
+    return jsonify({"config": serialize_doc(updated, db=db), "message": "System preferences updated successfully"})
 
 
 @config_bp.route("/reset", methods=["POST"])
@@ -166,7 +177,7 @@ def reset_config_from_env():
         "updated_at": now_iso(),
     }
     db.system_config.update_one({"_id": "singleton_config"}, {"$set": conf}, upsert=True)
-    return jsonify({"config": serialize_doc(conf), "message": "System preferences reset to baseline seed defaults"})
+    return jsonify({"config": serialize_doc(conf, db=db), "message": "System preferences reset to baseline seed defaults"})
 
 
 @config_bp.route("/smtp", methods=["GET"])
@@ -385,3 +396,60 @@ def update_sources_config():
         "disabled_count": len(disabled_list),
         "enabled_count": len(all_ids) - len(disabled_list),
     })
+
+
+@config_bp.route("/chatwoot", methods=["GET"])
+def get_chatwoot_settings():
+    db = get_db()
+    return jsonify(get_chatwoot_config(db, include_secrets=False)), 200
+
+
+@config_bp.route("/chatwoot", methods=["PATCH", "POST"])
+def update_chatwoot_settings():
+    data, ok = parse_json_object_body()
+    if not ok:
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    payload, status = apply_chatwoot_update(get_db(), data)
+    return jsonify(payload), status
+
+
+@config_bp.route("/chatwoot/test", methods=["POST"])
+def test_chatwoot_connection():
+    data, ok = parse_json_object_body()
+    if not ok:
+        return jsonify({
+            "success": False,
+            "reachable": False,
+            "status_code": None,
+            "inboxes": [],
+            "message": "Request body must be a JSON object",
+        }), 400
+    payload, status = probe_chatwoot_connection(get_db(), data, http_client_cls=httpx.Client)
+    return jsonify(payload), status
+
+
+@config_bp.route("/chatwoot/widget", methods=["GET"])
+def get_chatwoot_widget_settings():
+    db = get_db()
+    cfg = get_chatwoot_config(db, include_secrets=False)
+    return jsonify({
+        "enabled": bool(cfg["enabled"] and cfg["website_token"]),
+        "base_url": cfg["public_url"] or cfg["base_url"],
+        "website_token": cfg["website_token"],
+        "hmac_enabled": bool(cfg["has_website_hmac_secret"]),
+    }), 200
+
+
+@config_bp.route("/whatsapp", methods=["GET"])
+def get_whatsapp_settings():
+    db = get_db()
+    return jsonify(get_whatsapp_config(db, include_secrets=False)), 200
+
+
+@config_bp.route("/whatsapp", methods=["PATCH", "POST"])
+def update_whatsapp_settings():
+    data, ok = parse_json_object_body()
+    if not ok:
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    payload, status = apply_whatsapp_update(get_db(), data)
+    return jsonify(payload), status

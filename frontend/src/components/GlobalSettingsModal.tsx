@@ -153,6 +153,7 @@ export default function GlobalSettingsModal({
               smtpStatusMsg={smtpStatusMsg}
               onSaveSmtp={handleSaveSmtp}
               onTestSmtp={handleTestSmtp}
+              onCloseModal={onClose}
               isLight={isLight}
               accentClasses={accentClasses}
             />
